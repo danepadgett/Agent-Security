@@ -119,6 +119,21 @@ pub struct ProcessKey {
     pub start_hint: String,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProcessBehaviorFeatures {
+    pub has_pipe: bool,
+    pub has_shell_control_operator: bool,
+    pub has_inline_code_execution: bool,
+    pub uses_network_download_tool: bool,
+    pub references_downloads_path: bool,
+    pub references_persistence_path: bool,
+    pub references_script_file: bool,
+    pub references_executable_candidate: bool,
+    pub suspicious_command_patterns: Vec<String>,
+    pub referenced_paths: Vec<String>,
+    pub token_count: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessInfo {
     pub pid: i32,
@@ -131,6 +146,25 @@ pub struct ProcessInfo {
     pub parent_args: Option<String>,
     pub parent_process_kind: Option<String>,
     pub parent_command_path_kind: Option<String>,
+    pub behavior: ProcessBehaviorFeatures,
+}
+
+impl ProcessInfo {
+    pub fn placeholder(pid: i32) -> Self {
+        Self {
+            pid,
+            ppid: 0,
+            command: format!("unknown:{pid}"),
+            args: String::new(),
+            process_kind: "unknown".to_string(),
+            command_path_kind: "unknown".to_string(),
+            parent_command: None,
+            parent_args: None,
+            parent_process_kind: None,
+            parent_command_path_kind: None,
+            behavior: ProcessBehaviorFeatures::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

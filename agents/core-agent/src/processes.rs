@@ -1,4 +1,5 @@
 use crate::classify::{classify_path, classify_process_command};
+use crate::command_features::extract_features;
 use crate::models::{ProcessEvent, ProcessInfo, ProcessKey, TelemetryEvent};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -43,7 +44,8 @@ pub fn collect_new_process_events(
                     "parent_command": process.parent_command,
                     "parent_args": process.parent_args,
                     "parent_process_kind": process.parent_process_kind,
-                    "parent_command_path_kind": process.parent_command_path_kind
+                    "parent_command_path_kind": process.parent_command_path_kind,
+                    "behavior": process.behavior,
                 }),
             );
 
@@ -75,6 +77,7 @@ fn snapshot_raw_processes() -> Result<HashMap<ProcessKey, RawProcessInfo>> {
             if should_ignore_raw_process(&info) {
                 continue;
             }
+
             processes.insert(key, info);
         }
     }
@@ -104,6 +107,7 @@ fn enrich_with_parent_context(
                 parent_args: parent.map(|p| p.args.clone()),
                 parent_process_kind: parent.map(|p| classify_process_command(&p.command)),
                 parent_command_path_kind: parent.map(|p| classify_path(&p.command)),
+                behavior: extract_features(&raw.command, &raw.args),
             };
 
             (key, process)
@@ -124,9 +128,9 @@ fn parse_ps_line(line: &str) -> Option<(ProcessKey, RawProcessInfo)> {
 
     let pid = parts[0].parse::<i32>().ok()?;
     let ppid = parts[1].parse::<i32>().ok()?;
-
     let start_hint = parts[2..7].join(" ");
     let command_and_args = parts[7..].join(" ");
+
     if command_and_args.is_empty() {
         return None;
     }
@@ -136,7 +140,6 @@ fn parse_ps_line(line: &str) -> Option<(ProcessKey, RawProcessInfo)> {
     let args = split.next().unwrap_or("").to_string();
 
     let key = ProcessKey { pid, start_hint };
-
     let info = RawProcessInfo {
         pid,
         ppid,
@@ -150,6 +153,7 @@ fn parse_ps_line(line: &str) -> Option<(ProcessKey, RawProcessInfo)> {
 fn should_ignore_raw_process(process: &RawProcessInfo) -> bool {
     let command = process.command.as_str();
     let args = process.args.as_str();
+
     let full = if args.is_empty() {
         command.to_string()
     } else {

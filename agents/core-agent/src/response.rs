@@ -1,9 +1,13 @@
 use crate::config::ResponsePolicy;
-use crate::guardrails::{should_allow_file_quarantine, should_allow_process_kill};
+use crate::guardrails::{
+    path_kind, should_allow_file_quarantine, should_allow_process_kill, FileQuarantineRequest,
+    ProcessKillRequest,
+};
 use crate::models::TelemetryEvent;
 use anyhow::{Context, Result};
 use chrono::Utc;
-use serde_json::json;
+use serde_json::{json, Value};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -14,60 +18,84 @@ pub fn handle_detection(event: &TelemetryEvent, policy: &ResponsePolicy) -> Resu
     let mut out = Vec::new();
     let score = alert_score(event);
 
-    if policy.enable_process_kill && score >= policy.kill_threshold {
-        let pid = extract_pid(event);
-        let process_kind = extract_chosen_process_kind(event);
-        let path = extract_file_path(event);
+    let kill_targets = collect_process_kill_targets(event);
+    let quarantine_targets = collect_file_quarantine_targets(event);
 
-        match should_allow_process_kill(process_kind.as_deref(), path.as_deref(), policy) {
-            Ok(()) => {
-                if let Some(pid) = pid {
+    if policy.enable_process_kill && score >= policy.kill_threshold {
+        for target in kill_targets {
+            let request = ProcessKillRequest {
+                pid: target.pid,
+                process_kind: target.process_kind.as_deref(),
+                path: target.associated_path.as_deref(),
+                score,
+                original_event_type: event.event_type.as_str(),
+                chain_root_pid: target.chain_root_pid,
+                is_root_process: target.is_root_process,
+            };
+
+            match should_allow_process_kill(&request, policy) {
+                Ok(()) => {
                     if policy.simulation_mode {
                         out.push(build_response_event(
                             "response_simulated_process_kill",
                             json!({
                                 "original_event_type": event.event_type,
-                                "pid": pid,
+                                "pid": target.pid,
                                 "score": score,
-                                "process_kind": process_kind,
-                                "path": path,
+                                "process_kind": target.process_kind,
+                                "associated_path": target.associated_path,
+                                "chain_root_pid": target.chain_root_pid,
+                                "is_root_process": target.is_root_process,
                                 "reason": "Policy threshold met for process kill, but simulation mode is enabled"
                             }),
                         ));
-                    } else if kill_process(pid)? {
+                    } else if kill_process(target.pid)? {
                         out.push(build_response_event(
                             "response_process_killed",
                             json!({
                                 "original_event_type": event.event_type,
-                                "pid": pid,
+                                "pid": target.pid,
                                 "score": score,
-                                "process_kind": process_kind,
-                                "path": path
+                                "process_kind": target.process_kind,
+                                "associated_path": target.associated_path,
+                                "chain_root_pid": target.chain_root_pid,
+                                "is_root_process": target.is_root_process
                             }),
                         ));
                     }
                 }
-            }
-            Err(reason) => {
-                out.push(build_response_event(
-                    "response_blocked_by_guardrail",
-                    json!({
-                        "action": "process_kill",
-                        "original_event_type": event.event_type,
-                        "score": score,
-                        "pid": pid,
-                        "process_kind": process_kind,
-                        "path": path,
-                        "reason": reason
-                    }),
-                ));
+                Err(reason) => {
+                    out.push(build_response_event(
+                        "response_blocked_by_guardrail",
+                        json!({
+                            "action": "process_kill",
+                            "original_event_type": event.event_type,
+                            "score": score,
+                            "pid": target.pid,
+                            "process_kind": target.process_kind,
+                            "associated_path": target.associated_path,
+                            "chain_root_pid": target.chain_root_pid,
+                            "is_root_process": target.is_root_process,
+                            "reason": reason
+                        }),
+                    ));
+                }
             }
         }
     }
 
     if policy.enable_file_quarantine && score >= policy.quarantine_threshold {
-        if let Some(path) = extract_file_path(event) {
-            match should_allow_file_quarantine(&path, policy) {
+        for path in quarantine_targets {
+            let classified_path_kind = path_kind(&path);
+
+            let request = FileQuarantineRequest {
+                path: &path,
+                score,
+                original_event_type: event.event_type.as_str(),
+                path_kind: &classified_path_kind,
+            };
+
+            match should_allow_file_quarantine(&request, policy) {
                 Ok(()) => {
                     if policy.simulation_mode {
                         out.push(build_response_event(
@@ -75,6 +103,7 @@ pub fn handle_detection(event: &TelemetryEvent, policy: &ResponsePolicy) -> Resu
                             json!({
                                 "original_event_type": event.event_type,
                                 "path": path,
+                                "path_kind": classified_path_kind,
                                 "score": score,
                                 "reason": "Policy threshold met for file quarantine, but simulation mode is enabled"
                             }),
@@ -86,6 +115,7 @@ pub fn handle_detection(event: &TelemetryEvent, policy: &ResponsePolicy) -> Resu
                                 "original_event_type": event.event_type,
                                 "old_path": path,
                                 "new_path": new_path,
+                                "path_kind": classified_path_kind,
                                 "score": score
                             }),
                         ));
@@ -99,6 +129,7 @@ pub fn handle_detection(event: &TelemetryEvent, policy: &ResponsePolicy) -> Resu
                             "original_event_type": event.event_type,
                             "score": score,
                             "path": path,
+                            "path_kind": classified_path_kind,
                             "reason": reason
                         }),
                     ));
@@ -110,7 +141,16 @@ pub fn handle_detection(event: &TelemetryEvent, policy: &ResponsePolicy) -> Resu
     Ok(out)
 }
 
-fn build_response_event(event_type: &str, payload: serde_json::Value) -> TelemetryEvent {
+#[derive(Debug, Clone)]
+struct ProcessKillTarget {
+    pid: i32,
+    process_kind: Option<String>,
+    associated_path: Option<String>,
+    chain_root_pid: Option<i32>,
+    is_root_process: bool,
+}
+
+fn build_response_event(event_type: &str, payload: Value) -> TelemetryEvent {
     TelemetryEvent::new(Utc::now(), event_type, "core-agent/response", payload)
 }
 
@@ -122,9 +162,130 @@ fn alert_score(event: &TelemetryEvent) -> u8 {
         .unwrap_or(0)
 }
 
-fn extract_pid(event: &TelemetryEvent) -> Option<i32> {
-    let details = event.payload.get("details")?;
+fn collect_process_kill_targets(event: &TelemetryEvent) -> Vec<ProcessKillTarget> {
+    let details = match event.payload.get("details") {
+        Some(details) => details,
+        None => return Vec::new(),
+    };
 
+    let chain_root_pid = details
+        .get("chain_root_pid")
+        .and_then(|v| v.as_i64())
+        .and_then(|v| i32::try_from(v).ok());
+
+    let related_paths = extract_string_array(details.get("related_paths"));
+
+    let associated_path = details
+        .get("primary_path")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            details
+                .get("matched_download_path")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
+        .or_else(|| related_paths.first().cloned());
+
+    let mut targets = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    if let Some(pids) = details.get("involved_pids").and_then(|v| v.as_array()) {
+        for pid_value in pids {
+            let Some(pid_i64) = pid_value.as_i64() else {
+                continue;
+            };
+            let Ok(pid) = i32::try_from(pid_i64) else {
+                continue;
+            };
+
+            if !seen.insert(pid) {
+                continue;
+            }
+
+            targets.push(ProcessKillTarget {
+                pid,
+                process_kind: details
+                    .get("chosen_process_kind")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .or_else(|| {
+                        details
+                            .get("child_process_kind")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string())
+                    })
+                    .or_else(|| {
+                        details
+                            .get("process_kind")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string())
+                    }),
+                associated_path: associated_path.clone(),
+                chain_root_pid,
+                is_root_process: chain_root_pid.map(|root| root == pid).unwrap_or(false),
+            });
+        }
+    }
+
+    if targets.is_empty() {
+        if let Some(pid) = extract_single_pid(details) {
+            targets.push(ProcessKillTarget {
+                pid,
+                process_kind: details
+                    .get("chosen_process_kind")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .or_else(|| {
+                        details
+                            .get("child_process_kind")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string())
+                    })
+                    .or_else(|| {
+                        details
+                            .get("process_kind")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string())
+                    }),
+                associated_path,
+                chain_root_pid,
+                is_root_process: chain_root_pid.map(|root| root == pid).unwrap_or(false),
+            });
+        }
+    }
+
+    targets
+}
+
+fn collect_file_quarantine_targets(event: &TelemetryEvent) -> Vec<String> {
+    let details = match event.payload.get("details") {
+        Some(details) => details,
+        None => return Vec::new(),
+    };
+
+    let mut targets = BTreeSet::new();
+
+    if let Some(path) = details.get("primary_path").and_then(|v| v.as_str()) {
+        targets.insert(path.to_string());
+    }
+
+    if let Some(path) = details.get("matched_download_path").and_then(|v| v.as_str()) {
+        targets.insert(path.to_string());
+    }
+
+    if let Some(path) = details.get("path").and_then(|v| v.as_str()) {
+        targets.insert(path.to_string());
+    }
+
+    for path in extract_string_array(details.get("related_paths")) {
+        targets.insert(path);
+    }
+
+    targets.into_iter().collect()
+}
+
+fn extract_single_pid(details: &Value) -> Option<i32> {
     details
         .get("pid")
         .and_then(|v| v.as_i64())
@@ -135,42 +296,23 @@ fn extract_pid(event: &TelemetryEvent) -> Option<i32> {
                 .and_then(|v| v.as_i64())
                 .and_then(|v| i32::try_from(v).ok())
         })
-}
-
-fn extract_file_path(event: &TelemetryEvent) -> Option<String> {
-    let details = event.payload.get("details")?;
-
-    details
-        .get("matched_download_path")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
         .or_else(|| {
             details
-                .get("path")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
+                .get("parent_pid")
+                .and_then(|v| v.as_i64())
+                .and_then(|v| i32::try_from(v).ok())
         })
 }
 
-fn extract_chosen_process_kind(event: &TelemetryEvent) -> Option<String> {
-    let details = event.payload.get("details")?;
-
-    details
-        .get("chosen_process_kind")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .or_else(|| {
-            details
-                .get("process_kind")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
+fn extract_string_array(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items.iter()
+                .filter_map(|item| item.as_str().map(|s| s.to_string()))
+                .collect::<Vec<String>>()
         })
-        .or_else(|| {
-            details
-                .get("child_process_kind")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-        })
+        .unwrap_or_default()
 }
 
 fn kill_process(pid: i32) -> Result<bool> {

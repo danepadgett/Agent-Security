@@ -1,6 +1,8 @@
 mod classify;
+mod command_features;
 mod config;
 mod detections;
+mod execution_graph;
 mod files;
 mod guardrails;
 mod incidents;
@@ -13,6 +15,7 @@ use anyhow::Result;
 use chrono::Utc;
 use config::load_policy;
 use detections::{evaluate_detections, DetectionContext};
+use execution_graph::ExecutionGraphCache;
 use files::{collect_file_events, scan_directories, tracked_directories};
 use incidents::aggregate_incidents;
 use logging::append_event;
@@ -38,14 +41,14 @@ fn main() -> Result<()> {
     let watch_dirs = tracked_directories();
     println!("Watching directories:");
     for dir in &watch_dirs {
-        println!("  - {}", dir.display());
+        println!(" - {}", dir.display());
     }
 
     let mut previous_file_snapshot = scan_directories(&watch_dirs)?;
     let mut known_processes = processes::snapshot_processes()?;
-
     let mut recent_file_events: VecDeque<FileEventRecord> = VecDeque::new();
     let mut alert_last_seen: HashMap<String, chrono::DateTime<Utc>> = HashMap::new();
+    let mut execution_graph = ExecutionGraphCache::new(300);
     let mut startup_completed = false;
 
     loop {
@@ -61,7 +64,7 @@ fn main() -> Result<()> {
             recent_file_events.push_back(FileEventRecord::from(event));
         }
 
-        trim_recent_file_events(&mut recent_file_events, 120);
+        trim_recent_file_events(&mut recent_file_events, 300);
         trim_alert_cache(&mut alert_last_seen, 600, now);
 
         let (new_process_snapshot, process_events) =
@@ -80,18 +83,23 @@ fn main() -> Result<()> {
             append_event(&event.telemetry_event)?;
         }
 
+        let current_processes = process_events
+            .iter()
+            .map(|event| event.process.clone())
+            .collect::<Vec<_>>();
+
+        let current_file_window = recent_file_events.iter().cloned().collect::<Vec<_>>();
+        execution_graph.ingest_processes(&current_processes, &current_file_window, now);
+
         if startup_completed {
             let detection_context = DetectionContext {
-                recent_file_events: recent_file_events.iter().cloned().collect(),
-                recent_processes: process_events
-                    .iter()
-                    .map(|p| p.process.clone())
-                    .collect::<Vec<_>>(),
+                recent_file_events: current_file_window,
+                recent_processes: current_processes,
+                execution_graph: execution_graph.snapshot(),
                 now,
             };
 
             let detection_events = evaluate_detections(&detection_context);
-
             for detection in &detection_events {
                 if should_emit_alert(detection, &mut alert_last_seen, 60) {
                     println!("ALERT: {}", detection.event_type);
@@ -100,7 +108,6 @@ fn main() -> Result<()> {
             }
 
             let incident_events = aggregate_incidents(&detection_events, now);
-
             for incident in incident_events {
                 if should_emit_alert(&incident, &mut alert_last_seen, 60) {
                     println!("INCIDENT: {}", incident.event_type);
@@ -124,6 +131,7 @@ fn main() -> Result<()> {
 
 fn trim_recent_file_events(queue: &mut VecDeque<FileEventRecord>, seconds_to_keep: i64) {
     let cutoff = Utc::now() - chrono::Duration::seconds(seconds_to_keep);
+
     while let Some(front) = queue.front() {
         if front.timestamp < cutoff {
             queue.pop_front();

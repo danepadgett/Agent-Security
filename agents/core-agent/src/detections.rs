@@ -1,13 +1,15 @@
 use crate::classify::{is_persistence_path, is_script_interpreter};
+use crate::execution_graph::{ExecutionChain, ExecutionGraphSnapshot};
 use crate::models::{AlertSeverity, FileEventRecord, ProcessInfo, TelemetryEvent};
 use chrono::{DateTime, Duration, Utc};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::Path;
 
 pub struct DetectionContext {
     pub recent_file_events: Vec<FileEventRecord>,
     pub recent_processes: Vec<ProcessInfo>,
+    pub execution_graph: ExecutionGraphSnapshot,
     pub now: DateTime<Utc>,
 }
 
@@ -24,6 +26,11 @@ pub fn evaluate_detections(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
     detections.extend(detect_quarantined_file_activity(ctx));
     detections.extend(detect_persistence_artifact_touched(ctx));
     detections.extend(detect_suspicious_shell_chain(ctx));
+    detections.extend(detect_command_pattern_abuse(ctx));
+    detections.extend(detect_interpreter_abuse(ctx));
+    detections.extend(detect_interpreter_spawned_follow_on_binary(ctx));
+    detections.extend(detect_suspicious_persistence_chain(ctx));
+    detections.extend(detect_downloaded_installer_activity(ctx));
 
     detections
 }
@@ -41,30 +48,30 @@ pub fn alert_fingerprint(event: &TelemetryEvent) -> String {
             format!("{}:{}", event.event_type, directory)
         }
         "alert_downloaded_file_executed" => {
-            let command = payload
+            let pid = payload
                 .get("details")
-                .and_then(|d| d.get("command"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown");
+                .and_then(|d| d.get("pid"))
+                .and_then(|v| v.as_i64())
+                .unwrap_or(-1);
             let matched_download_path = payload
                 .get("details")
                 .and_then(|d| d.get("matched_download_path"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
-            format!("{}:{}:{}", event.event_type, command, matched_download_path)
+            format!("{}:{}:{}", event.event_type, pid, matched_download_path)
         }
         "alert_interpreter_launch_from_downloads" => {
-            let interpreter = payload
+            let pid = payload
                 .get("details")
-                .and_then(|d| d.get("interpreter"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown");
+                .and_then(|d| d.get("pid"))
+                .and_then(|v| v.as_i64())
+                .unwrap_or(-1);
             let matched_download_path = payload
                 .get("details")
                 .and_then(|d| d.get("matched_download_path"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
-            format!("{}:{}:{}", event.event_type, interpreter, matched_download_path)
+            format!("{}:{}:{}", event.event_type, pid, matched_download_path)
         }
         "alert_file_became_executable" => {
             let path = payload
@@ -82,15 +89,18 @@ pub fn alert_fingerprint(event: &TelemetryEvent) -> String {
                 .unwrap_or("unknown");
             format!("{}:{}", event.event_type, path)
         }
-        "alert_persistence_artifact_touched" => {
+        "alert_persistence_artifact_touched" | "alert_suspicious_persistence_chain" => {
             let path = payload
                 .get("details")
                 .and_then(|d| d.get("path"))
+                .or_else(|| payload.get("details").and_then(|d| d.get("persistence_path")))
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
             format!("{}:{}", event.event_type, path)
         }
-        "alert_suspicious_shell_chain" => {
+        "alert_suspicious_shell_chain"
+        | "alert_interpreter_spawned_follow_on_binary"
+        | "alert_downloaded_installer_activity" => {
             let parent_pid = payload
                 .get("details")
                 .and_then(|d| d.get("parent_pid"))
@@ -99,17 +109,39 @@ pub fn alert_fingerprint(event: &TelemetryEvent) -> String {
             let child_command = payload
                 .get("details")
                 .and_then(|d| d.get("child_command"))
+                .or_else(|| payload.get("details").and_then(|d| d.get("command")))
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
             format!("{}:{}:{}", event.event_type, parent_pid, child_command)
         }
-        "alert_behavioral_incident" => {
-            let path = payload
+        "alert_command_pattern_abuse" => {
+            let pid = payload
                 .get("details")
-                .and_then(|d| d.get("path"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown");
-            format!("{}:{}", event.event_type, path)
+                .and_then(|d| d.get("pid"))
+                .and_then(|v| v.as_i64())
+                .unwrap_or(-1);
+            let patterns = payload
+                .get("details")
+                .and_then(|d| d.get("matched_patterns"))
+                .cloned()
+                .unwrap_or_else(|| json!([]));
+            format!("{}:{}:{}", event.event_type, pid, patterns)
+        }
+        "alert_interpreter_abuse" => {
+            let pid = payload
+                .get("details")
+                .and_then(|d| d.get("pid"))
+                .and_then(|v| v.as_i64())
+                .unwrap_or(-1);
+            format!("{}:{}", event.event_type, pid)
+        }
+        "alert_behavioral_incident" => {
+            let chain_root_pid = payload
+                .get("details")
+                .and_then(|d| d.get("chain_root_pid"))
+                .and_then(|v| v.as_i64())
+                .unwrap_or(-1);
+            format!("{}:{}", event.event_type, chain_root_pid)
         }
         _ => format!("{}:{}", event.event_type, payload),
     }
@@ -128,10 +160,7 @@ fn detect_burst_file_activity(ctx: &DetectionContext) -> Option<TelemetryEvent> 
         *count_by_directory.entry(directory).or_insert(0) += 1;
     }
 
-    let (directory, count) = count_by_directory
-        .into_iter()
-        .max_by_key(|(_, count)| *count)?;
-
+    let (directory, count) = count_by_directory.into_iter().max_by_key(|(_, count)| *count)?;
     if count < 25 {
         return None;
     }
@@ -144,7 +173,7 @@ fn detect_burst_file_activity(ctx: &DetectionContext) -> Option<TelemetryEvent> 
         "Unusually high file activity in a short time window",
         json!({
             "directory": directory,
-            "events_in_last_15_seconds": count
+            "events_in_last_15_seconds": count,
         }),
     ))
 }
@@ -167,25 +196,30 @@ fn detect_downloaded_file_execution(ctx: &DetectionContext) -> Vec<TelemetryEven
 
         for download_path in &recent_download_paths {
             if process_text.contains(download_path) || process.command == *download_path {
+                let mut details = json!({
+                    "pid": process.pid,
+                    "ppid": process.ppid,
+                    "command": process.command,
+                    "args": process.args,
+                    "process_kind": process.process_kind,
+                    "command_path_kind": process.command_path_kind,
+                    "matched_download_path": download_path,
+                    "parent_command": process.parent_command,
+                    "parent_args": process.parent_args,
+                    "parent_process_kind": process.parent_process_kind,
+                    "parent_command_path_kind": process.parent_command_path_kind,
+                    "behavior": process.behavior,
+                });
+
+                merge_chain_details(&mut details, chain_details(process.pid, &ctx.execution_graph));
+
                 detections.push(build_alert(
                     ctx.now,
                     "alert_downloaded_file_executed",
                     AlertSeverity::High,
                     "execution",
                     "A recently downloaded file appears to have been executed",
-                    json!({
-                        "pid": process.pid,
-                        "ppid": process.ppid,
-                        "command": process.command,
-                        "args": process.args,
-                        "process_kind": process.process_kind,
-                        "command_path_kind": process.command_path_kind,
-                        "matched_download_path": download_path,
-                        "parent_command": process.parent_command,
-                        "parent_args": process.parent_args,
-                        "parent_process_kind": process.parent_process_kind,
-                        "parent_command_path_kind": process.parent_command_path_kind
-                    }),
+                    details,
                 ));
                 break;
             }
@@ -217,26 +251,31 @@ fn detect_interpreter_launch_from_downloads(ctx: &DetectionContext) -> Vec<Telem
 
         for download_path in &recent_download_paths {
             if process_text.contains(download_path) {
+                let mut details = json!({
+                    "pid": process.pid,
+                    "ppid": process.ppid,
+                    "interpreter": process.command,
+                    "args": process.args,
+                    "process_kind": process.process_kind,
+                    "command_path_kind": process.command_path_kind,
+                    "matched_download_path": download_path,
+                    "file_extension": file_extension(download_path),
+                    "parent_command": process.parent_command,
+                    "parent_args": process.parent_args,
+                    "parent_process_kind": process.parent_process_kind,
+                    "parent_command_path_kind": process.parent_command_path_kind,
+                    "behavior": process.behavior,
+                });
+
+                merge_chain_details(&mut details, chain_details(process.pid, &ctx.execution_graph));
+
                 detections.push(build_alert(
                     ctx.now,
                     "alert_interpreter_launch_from_downloads",
                     AlertSeverity::High,
                     "script_execution",
                     "A script interpreter appears to have launched content from Downloads",
-                    json!({
-                        "pid": process.pid,
-                        "ppid": process.ppid,
-                        "interpreter": process.command,
-                        "args": process.args,
-                        "process_kind": process.process_kind,
-                        "command_path_kind": process.command_path_kind,
-                        "matched_download_path": download_path,
-                        "file_extension": file_extension(download_path),
-                        "parent_command": process.parent_command,
-                        "parent_args": process.parent_args,
-                        "parent_process_kind": process.parent_process_kind,
-                        "parent_command_path_kind": process.parent_command_path_kind
-                    }),
+                    details,
                 ));
                 break;
             }
@@ -270,7 +309,7 @@ fn detect_file_became_executable(ctx: &DetectionContext) -> Vec<TelemetryEvent> 
                     "path": event.path,
                     "directory": parent_dir_string(&event.path),
                     "in_downloads": event.path.contains("/Downloads/"),
-                    "file_extension": file_extension(&event.path)
+                    "file_extension": file_extension(&event.path),
                 }),
             )
         })
@@ -308,7 +347,7 @@ fn detect_quarantined_file_activity(ctx: &DetectionContext) -> Vec<TelemetryEven
                     "is_executable": event.is_executable,
                     "size_bytes": event.size_bytes,
                     "quarantine_value": event.quarantine_value,
-                    "top_level_download_item": is_top_level_download_item(&event.path)
+                    "top_level_download_item": is_top_level_download_item(&event.path),
                 }),
             )
         })
@@ -336,7 +375,7 @@ fn detect_persistence_artifact_touched(ctx: &DetectionContext) -> Vec<TelemetryE
                     "directory": parent_dir_string(&event.path),
                     "file_extension": file_extension(&event.path),
                     "is_executable": event.is_executable,
-                    "has_quarantine": event.has_quarantine
+                    "has_quarantine": event.has_quarantine,
                 }),
             )
         })
@@ -375,13 +414,27 @@ fn detect_suspicious_shell_chain(ctx: &DetectionContext) -> Vec<TelemetryEvent> 
 
     for child in &ctx.recent_processes {
         if let Some((parent, matched_download_path)) = interpreter_parents.get(&child.ppid) {
-            if child.pid == parent.pid {
+            if child.pid == parent.pid || is_boring_shell_child(&child.command) {
                 continue;
             }
 
-            if is_boring_shell_child(&child.command) {
-                continue;
-            }
+            let mut details = json!({
+                "parent_pid": parent.pid,
+                "parent_command": parent.command,
+                "parent_args": parent.args,
+                "parent_process_kind": parent.process_kind,
+                "parent_command_path_kind": parent.command_path_kind,
+                "child_pid": child.pid,
+                "child_command": child.command,
+                "child_args": child.args,
+                "child_process_kind": child.process_kind,
+                "child_command_path_kind": child.command_path_kind,
+                "matched_download_path": matched_download_path,
+                "child_parent_command": child.parent_command,
+                "child_parent_args": child.parent_args,
+            });
+
+            merge_chain_details(&mut details, chain_details(child.pid, &ctx.execution_graph));
 
             detections.push(build_alert(
                 ctx.now,
@@ -389,26 +442,349 @@ fn detect_suspicious_shell_chain(ctx: &DetectionContext) -> Vec<TelemetryEvent> 
                 AlertSeverity::High,
                 "process_chain",
                 "A script launched from Downloads spawned a follow-on child process",
-                json!({
-                    "parent_pid": parent.pid,
-                    "parent_command": parent.command,
-                    "parent_args": parent.args,
-                    "parent_process_kind": parent.process_kind,
-                    "parent_command_path_kind": parent.command_path_kind,
-                    "child_pid": child.pid,
-                    "child_command": child.command,
-                    "child_args": child.args,
-                    "child_process_kind": child.process_kind,
-                    "child_command_path_kind": child.command_path_kind,
-                    "matched_download_path": matched_download_path,
-                    "child_parent_command": child.parent_command,
-                    "child_parent_args": child.parent_args
-                }),
+                details,
             ));
         }
     }
 
     detections
+}
+
+fn detect_command_pattern_abuse(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
+    let mut detections = Vec::new();
+
+    for process in &ctx.recent_processes {
+        if process.behavior.suspicious_command_patterns.is_empty() {
+            continue;
+        }
+
+        let severity = if process
+            .behavior
+            .suspicious_command_patterns
+            .iter()
+            .any(|pattern| pattern == "network_tool_piped_to_shell")
+        {
+            AlertSeverity::Critical
+        } else if process
+            .behavior
+            .suspicious_command_patterns
+            .iter()
+            .any(|pattern| {
+                pattern == "launchctl_persistence_operation"
+                    || pattern == "installer_pkg_execution"
+                    || pattern == "open_executable_candidate"
+            }) {
+            AlertSeverity::High
+        } else {
+            AlertSeverity::High
+        };
+
+        let mut details = json!({
+            "pid": process.pid,
+            "ppid": process.ppid,
+            "command": process.command,
+            "args": process.args,
+            "process_kind": process.process_kind,
+            "command_path_kind": process.command_path_kind,
+            "matched_patterns": process.behavior.suspicious_command_patterns,
+            "referenced_paths": process.behavior.referenced_paths,
+            "behavior": process.behavior,
+            "parent_command": process.parent_command,
+            "parent_args": process.parent_args,
+            "parent_process_kind": process.parent_process_kind,
+        });
+
+        merge_chain_details(&mut details, chain_details(process.pid, &ctx.execution_graph));
+
+        detections.push(build_alert(
+            ctx.now,
+            "alert_command_pattern_abuse",
+            severity,
+            "command_pattern",
+            "A process command line matched suspicious execution patterns",
+            details,
+        ));
+    }
+
+    detections
+}
+
+fn detect_interpreter_abuse(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
+    let mut detections = Vec::new();
+
+    for process in &ctx.recent_processes {
+        if !is_script_interpreter(&process.command) {
+            continue;
+        }
+
+        let high_signal = process.behavior.has_inline_code_execution
+            || process.behavior.references_downloads_path
+            || process.behavior.references_script_file
+            || process.behavior.references_persistence_path;
+
+        if !high_signal {
+            continue;
+        }
+
+        let severity = if process.behavior.references_downloads_path
+            && process.behavior.references_script_file
+        {
+            AlertSeverity::High
+        } else {
+            AlertSeverity::Medium
+        };
+
+        let mut details = json!({
+            "pid": process.pid,
+            "ppid": process.ppid,
+            "interpreter": process.command,
+            "args": process.args,
+            "process_kind": process.process_kind,
+            "command_path_kind": process.command_path_kind,
+            "behavior": process.behavior,
+            "parent_command": process.parent_command,
+            "parent_args": process.parent_args,
+            "parent_process_kind": process.parent_process_kind,
+        });
+
+        merge_chain_details(&mut details, chain_details(process.pid, &ctx.execution_graph));
+
+        detections.push(build_alert(
+            ctx.now,
+            "alert_interpreter_abuse",
+            severity,
+            "interpreter_abuse",
+            "A script interpreter was launched with high-signal execution characteristics",
+            details,
+        ));
+    }
+
+    detections
+}
+
+fn detect_interpreter_spawned_follow_on_binary(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
+    let mut detections = Vec::new();
+
+    for child in &ctx.recent_processes {
+        let Some(parent_node) = ctx.execution_graph.nodes.get(&child.ppid) else {
+            continue;
+        };
+
+        let parent = &parent_node.process;
+
+        if !is_script_interpreter(&parent.command) {
+            continue;
+        }
+
+        let suspicious_parent = parent.behavior.has_inline_code_execution
+            || parent.behavior.references_downloads_path
+            || !parent.behavior.suspicious_command_patterns.is_empty();
+
+        if !suspicious_parent || is_boring_shell_child(&child.command) {
+            continue;
+        }
+
+        let mut details = json!({
+            "parent_pid": parent.pid,
+            "parent_command": parent.command,
+            "parent_args": parent.args,
+            "parent_process_kind": parent.process_kind,
+            "child_pid": child.pid,
+            "child_command": child.command,
+            "child_args": child.args,
+            "child_process_kind": child.process_kind,
+            "child_command_path_kind": child.command_path_kind,
+            "parent_behavior": parent.behavior,
+            "child_behavior": child.behavior,
+        });
+
+        merge_chain_details(&mut details, chain_details(child.pid, &ctx.execution_graph));
+
+        detections.push(build_alert(
+            ctx.now,
+            "alert_interpreter_spawned_follow_on_binary",
+            AlertSeverity::High,
+            "process_chain",
+            "A suspicious interpreter process spawned a follow-on child process",
+            details,
+        ));
+    }
+
+    detections
+}
+
+fn detect_suspicious_persistence_chain(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
+    let cutoff = ctx.now - Duration::seconds(180);
+    let persistence_events: Vec<&FileEventRecord> = ctx
+        .recent_file_events
+        .iter()
+        .filter(|event| event.timestamp >= cutoff)
+        .filter(|event| event.kind == "file_created" || event.kind == "file_modified")
+        .filter(|event| is_persistence_path(&event.path))
+        .collect();
+
+    let mut detections = Vec::new();
+
+    for persistence_event in persistence_events {
+        for process in &ctx.recent_processes {
+            let chain = ctx.execution_graph.chain_for_pid(process.pid, 6);
+
+            let Some(chain) = chain else {
+                continue;
+            };
+
+            let chain_refs_persistence = chain.related_paths.iter().any(|path| path == &persistence_event.path)
+                || process
+                    .behavior
+                    .referenced_paths
+                    .iter()
+                    .any(|path| path == &persistence_event.path)
+                || process.behavior.references_persistence_path;
+
+            let suspicious_chain = process.behavior.references_downloads_path
+                || process.behavior.has_inline_code_execution
+                || !process.behavior.suspicious_command_patterns.is_empty()
+                || chain.attack_chain_length >= 2;
+
+            if !(chain_refs_persistence && suspicious_chain) {
+                continue;
+            }
+
+            let severity = if process.behavior.references_downloads_path
+                || process
+                    .behavior
+                    .suspicious_command_patterns
+                    .iter()
+                    .any(|p| p == "launchctl_persistence_operation")
+            {
+                AlertSeverity::Critical
+            } else {
+                AlertSeverity::High
+            };
+
+            let mut details = json!({
+                "persistence_path": persistence_event.path,
+                "event_kind": persistence_event.kind,
+                "pid": process.pid,
+                "ppid": process.ppid,
+                "command": process.command,
+                "args": process.args,
+                "process_kind": process.process_kind,
+                "command_path_kind": process.command_path_kind,
+                "behavior": process.behavior,
+                "parent_command": process.parent_command,
+                "parent_args": process.parent_args,
+                "parent_process_kind": process.parent_process_kind,
+            });
+
+            merge_chain_details(&mut details, execution_chain_json(&chain));
+
+            detections.push(build_alert(
+                ctx.now,
+                "alert_suspicious_persistence_chain",
+                severity,
+                "persistence",
+                "A suspicious execution chain appears to have referenced or modified a persistence artifact",
+                details,
+            ));
+        }
+    }
+
+    detections
+}
+
+fn detect_downloaded_installer_activity(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
+    let mut detections = Vec::new();
+
+    for process in &ctx.recent_processes {
+        let patterns = &process.behavior.suspicious_command_patterns;
+        let installer_like = patterns.iter().any(|pattern| {
+            pattern == "installer_pkg_execution"
+                || pattern == "open_executable_candidate"
+                || pattern == "downloads_executable_reference"
+        });
+
+        if !installer_like {
+            continue;
+        }
+
+        let high_signal = process.behavior.references_downloads_path
+            || process.behavior.references_executable_candidate
+            || process.behavior.has_shell_control_operator;
+
+        if !high_signal {
+            continue;
+        }
+
+        let severity = if process.behavior.references_downloads_path
+            && process.behavior.references_executable_candidate
+        {
+            AlertSeverity::High
+        } else {
+            AlertSeverity::Medium
+        };
+
+        let mut details = json!({
+            "pid": process.pid,
+            "ppid": process.ppid,
+            "command": process.command,
+            "args": process.args,
+            "process_kind": process.process_kind,
+            "command_path_kind": process.command_path_kind,
+            "matched_patterns": process.behavior.suspicious_command_patterns,
+            "behavior": process.behavior,
+            "parent_command": process.parent_command,
+            "parent_args": process.parent_args,
+            "parent_process_kind": process.parent_process_kind,
+        });
+
+        merge_chain_details(&mut details, chain_details(process.pid, &ctx.execution_graph));
+
+        detections.push(build_alert(
+            ctx.now,
+            "alert_downloaded_installer_activity",
+            severity,
+            "installer_execution",
+            "A process referenced executable installer-like content from Downloads",
+            details,
+        ));
+    }
+
+    detections
+}
+
+fn chain_details(pid: i32, snapshot: &ExecutionGraphSnapshot) -> Value {
+    if let Some(chain) = snapshot.chain_for_pid(pid, 6) {
+        execution_chain_json(&chain)
+    } else {
+        json!({
+            "chain_root_pid": pid,
+            "chain_root_command": "unknown",
+            "attack_chain_length": 1,
+            "chain_pids": [pid],
+            "chain_commands": [],
+            "related_paths": [],
+        })
+    }
+}
+
+fn execution_chain_json(chain: &ExecutionChain) -> Value {
+    json!({
+        "chain_root_pid": chain.chain_root_pid,
+        "chain_root_command": chain.chain_root_command,
+        "attack_chain_length": chain.attack_chain_length,
+        "chain_pids": chain.pids,
+        "chain_commands": chain.process_chain.iter().map(|p| p.command.clone()).collect::<Vec<String>>(),
+        "related_paths": chain.related_paths,
+    })
+}
+
+fn merge_chain_details(details: &mut Value, chain: Value) {
+    if let (Some(details_map), Some(chain_map)) = (details.as_object_mut(), chain.as_object()) {
+        for (key, value) in chain_map {
+            details_map.insert(key.clone(), value.clone());
+        }
+    }
 }
 
 fn quarantine_severity(event: &FileEventRecord) -> AlertSeverity {
@@ -427,7 +803,6 @@ fn is_high_signal_download_path(path: &str) -> bool {
     }
 
     let lower = path.to_ascii_lowercase();
-
     lower.ends_with(".app")
         || lower.ends_with(".pkg")
         || lower.ends_with(".dmg")
@@ -497,7 +872,7 @@ fn build_alert(
             "score": severity.score(),
             "category": category,
             "reason": reason,
-            "details": details
+            "details": details,
         }),
     )
 }
