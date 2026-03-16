@@ -1,0 +1,174 @@
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  color: #f5f5f5;
+  background: #0f1115;
+}
+
+body {
+  margin: 0;
+  background: #0f1115;
+  color: #f5f5f5;
+}
+
+.container {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 32px;
+}
+
+h1 {
+  margin-bottom: 8px;
+}
+
+h2 {
+  margin-top: 0;
+}
+
+.subtitle {
+  margin-top: 0;
+  color: #a1a1aa;
+}
+
+.toolbar {
+  margin: 20px 0 28px 0;
+}
+
+button {
+  border: none;
+  border-radius: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.storylines-section,
+.raw-events-section {
+  margin-top: 28px;
+}
+
+.storylines {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.story-card {
+  background: #171a21;
+  border: 1px solid #262b36;
+  border-radius: 16px;
+  padding: 18px;
+}
+
+.story-card-alert {
+  border: 1px solid #7f1d1d;
+  background: #2a1111;
+}
+
+.story-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.story-title {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.story-path {
+  margin-top: 4px;
+  color: #a1a1aa;
+  word-break: break-all;
+}
+
+.severity-pill {
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.severity-high {
+  background: #7f1d1d;
+  color: #ffe2e2;
+}
+
+.severity-info {
+  background: #1f2937;
+  color: #d1d5db;
+}
+
+.story-events {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.story-event-row {
+  display: grid;
+  grid-template-columns: 140px 140px 1fr;
+  gap: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 10px;
+}
+
+.story-event-time {
+  color: #cbd5e1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.story-event-type {
+  font-weight: 600;
+  color: #93c5fd;
+}
+
+.story-event-summary {
+  color: #f3f4f6;
+}
+
+.events {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.event-card {
+  background: #171a21;
+  border: 1px solid #262b36;
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.alert-card {
+  border: 1px solid #7f1d1d;
+  background: #2a1111;
+}
+
+pre {
+  background: #0b0d12;
+  padding: 12px;
+  border-radius: 10px;
+  overflow-x: auto;
+}
+
+.empty {
+  color: #a1a1aa;
+}
+
+.error {
+  background: #3a1111;
+  color: #ffb4b4;
+  padding: 12px;
+  border-radius: 10px;
+  margin-bottom: 16px;
+}
+
+.story-summary {
+  margin-top: 10px;
+  color: #e5e7eb;
+  max-width: 760px;
+  line-height: 1.4;
+}
