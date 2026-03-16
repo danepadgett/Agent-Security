@@ -1,0 +1,11 @@
+{
+  "simulation_mode": true,
+  "enable_process_kill": true,
+  "enable_file_quarantine": true,
+  "kill_threshold": 85,
+  "quarantine_threshold": 75,
+  "safe_process_kinds": ["system", "browser"],
+  "safe_path_kinds": ["system_space", "persistence"],
+  "safe_file_extensions": ["jpg", "jpeg", "png", "gif", "pdf", "ppt", "pptx", "doc", "docx", "txt", "md", "mp3", "mp4"],
+  "quarantine_candidate_extensions": ["app", "pkg", "dmg", "zip", "xip", "sh", "command", "py", "js", "scpt", "jar", "bin"]
+}
