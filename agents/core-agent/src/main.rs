@@ -10,6 +10,7 @@ mod logging;
 mod models;
 mod processes;
 mod response;
+mod state;
 
 use anyhow::Result;
 use chrono::Utc;
@@ -21,9 +22,15 @@ use incidents::aggregate_incidents;
 use logging::append_event;
 use models::{FileEventRecord, TelemetryEvent};
 use response::handle_detection;
+use state::{normalize_state_summary, AgentState};
 use std::collections::{HashMap, VecDeque};
 use std::thread;
 use std::time::Duration;
+
+const ALERT_EMIT_COOLDOWN_SECONDS: i64 = 60;
+const INCIDENT_EMIT_COOLDOWN_SECONDS: i64 = 120;
+const INCIDENT_STATE_TTL_SECONDS: i64 = 3600;
+const RESPONSE_STATE_TTL_SECONDS: i64 = 3600;
 
 fn main() -> Result<()> {
     println!("Core Agent Starting...");
@@ -49,10 +56,13 @@ fn main() -> Result<()> {
     let mut recent_file_events: VecDeque<FileEventRecord> = VecDeque::new();
     let mut alert_last_seen: HashMap<String, chrono::DateTime<Utc>> = HashMap::new();
     let mut execution_graph = ExecutionGraphCache::new(300);
+    let mut agent_state = AgentState::new();
     let mut startup_completed = false;
+    let mut loop_counter: u64 = 0;
 
     loop {
         let now = Utc::now();
+        loop_counter += 1;
 
         let (new_snapshot, file_events) =
             collect_file_events(&watch_dirs, &previous_file_snapshot, now)?;
@@ -66,6 +76,7 @@ fn main() -> Result<()> {
 
         trim_recent_file_events(&mut recent_file_events, 300);
         trim_alert_cache(&mut alert_last_seen, 600, now);
+        agent_state.prune(now, INCIDENT_STATE_TTL_SECONDS, RESPONSE_STATE_TTL_SECONDS);
 
         let (new_process_snapshot, process_events) =
             processes::collect_new_process_events(&known_processes, now)?;
@@ -101,7 +112,11 @@ fn main() -> Result<()> {
 
             let detection_events = evaluate_detections(&detection_context);
             for detection in &detection_events {
-                if should_emit_alert(detection, &mut alert_last_seen, 60) {
+                if should_emit_alert(
+                    detection,
+                    &mut alert_last_seen,
+                    ALERT_EMIT_COOLDOWN_SECONDS,
+                ) {
                     println!("ALERT: {}", detection.event_type);
                     append_event(detection)?;
                 }
@@ -109,16 +124,48 @@ fn main() -> Result<()> {
 
             let incident_events = aggregate_incidents(&detection_events, now);
             for incident in incident_events {
-                if should_emit_alert(&incident, &mut alert_last_seen, 60) {
-                    println!("INCIDENT: {}", incident.event_type);
+                let (should_emit_incident, record) = agent_state
+                    .should_emit_incident(&incident, INCIDENT_EMIT_COOLDOWN_SECONDS);
+
+                if should_emit_incident {
+                    println!(
+                        "INCIDENT: {} key={} seen_count={} score={}",
+                        incident.event_type,
+                        record.incident_key,
+                        record.seen_count,
+                        record.last_score
+                    );
                     append_event(&incident)?;
 
-                    let response_events = handle_detection(&incident, &policy)?;
+                    let response_events = handle_detection(&incident, &policy, &mut agent_state)?;
                     for response_event in response_events {
                         println!("RESPONSE: {}", response_event.event_type);
                         append_event(&response_event)?;
                     }
+                } else {
+                    println!(
+                        "INCIDENT SUPPRESSED: key={} seen_count={} score={}",
+                        record.incident_key,
+                        record.seen_count,
+                        record.last_score
+                    );
                 }
+            }
+
+            if loop_counter % 30 == 0 {
+                let state_summary = agent_state.snapshot_summary();
+                let normalized = normalize_state_summary(&state_summary);
+
+                let summary_event = TelemetryEvent::new(
+                    now,
+                    "agent_state_snapshot",
+                    "core-agent/state",
+                    serde_json::json!({
+                        "state_summary": state_summary,
+                        "normalized_summary": normalized
+                    }),
+                );
+                append_event(&summary_event)?;
             }
         } else {
             println!("Startup baseline established. Alerting enabled on next loop.");

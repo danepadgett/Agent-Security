@@ -4,6 +4,7 @@ use crate::guardrails::{
     ProcessKillRequest,
 };
 use crate::models::TelemetryEvent;
+use crate::state::{incident_key, response_action_key, AgentState};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use serde_json::{json, Value};
@@ -13,18 +14,47 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const QUARANTINE_DIR: &str = "runtime/quarantine";
+const RESPONSE_ACTION_COOLDOWN_SECONDS: i64 = 300;
 
-pub fn handle_detection(event: &TelemetryEvent, policy: &ResponsePolicy) -> Result<Vec<TelemetryEvent>> {
+pub fn handle_detection(
+    event: &TelemetryEvent,
+    policy: &ResponsePolicy,
+    agent_state: &mut AgentState,
+) -> Result<Vec<TelemetryEvent>> {
     let mut out = Vec::new();
     let score = alert_score(event);
     let attack_chain_length = extract_attack_chain_length(event);
     let confidence = extract_confidence(event);
+    let incident_key_value = incident_key(event);
 
     let kill_targets = scoped_process_kill_targets(event);
     let quarantine_targets = scoped_file_quarantine_targets(event);
 
     if policy.enable_process_kill && score >= policy.kill_threshold {
         for target in kill_targets {
+            let action_key = response_action_key("process_kill", &target.pid.to_string());
+
+            if !agent_state.should_allow_response_action(
+                &incident_key_value,
+                &action_key,
+                Utc::now(),
+                RESPONSE_ACTION_COOLDOWN_SECONDS,
+            ) {
+                out.push(build_response_event(
+                    "response_suppressed_by_cooldown",
+                    json!({
+                        "action": "process_kill",
+                        "original_event_type": event.event_type,
+                        "incident_key": incident_key_value,
+                        "action_key": action_key,
+                        "pid": target.pid,
+                        "selection_reason": target.selection_reason,
+                        "reason": "Response action suppressed because the same incident/target pair is still in cooldown"
+                    }),
+                ));
+                continue;
+            }
+
             let request = ProcessKillRequest {
                 pid: target.pid,
                 process_kind: target.process_kind.as_deref(),
@@ -44,6 +74,8 @@ pub fn handle_detection(event: &TelemetryEvent, policy: &ResponsePolicy) -> Resu
                             "response_simulated_process_kill",
                             json!({
                                 "original_event_type": event.event_type,
+                                "incident_key": incident_key_value,
+                                "action_key": action_key,
                                 "pid": target.pid,
                                 "score": score,
                                 "confidence": confidence,
@@ -55,11 +87,18 @@ pub fn handle_detection(event: &TelemetryEvent, policy: &ResponsePolicy) -> Resu
                                 "reason": "Policy threshold met for process kill, but simulation mode is enabled"
                             }),
                         ));
+                        agent_state.record_response_action(
+                            &incident_key_value,
+                            &action_key,
+                            Utc::now(),
+                        );
                     } else if kill_process(target.pid)? {
                         out.push(build_response_event(
                             "response_process_killed",
                             json!({
                                 "original_event_type": event.event_type,
+                                "incident_key": incident_key_value,
+                                "action_key": action_key,
                                 "pid": target.pid,
                                 "score": score,
                                 "confidence": confidence,
@@ -70,6 +109,11 @@ pub fn handle_detection(event: &TelemetryEvent, policy: &ResponsePolicy) -> Resu
                                 "selection_reason": target.selection_reason
                             }),
                         ));
+                        agent_state.record_response_action(
+                            &incident_key_value,
+                            &action_key,
+                            Utc::now(),
+                        );
                     }
                 }
                 Err(reason) => {
@@ -78,6 +122,8 @@ pub fn handle_detection(event: &TelemetryEvent, policy: &ResponsePolicy) -> Resu
                         json!({
                             "action": "process_kill",
                             "original_event_type": event.event_type,
+                            "incident_key": incident_key_value,
+                            "action_key": action_key,
                             "score": score,
                             "confidence": confidence,
                             "pid": target.pid,
@@ -96,6 +142,29 @@ pub fn handle_detection(event: &TelemetryEvent, policy: &ResponsePolicy) -> Resu
 
     if policy.enable_file_quarantine && score >= policy.quarantine_threshold {
         for target in quarantine_targets {
+            let action_key = response_action_key("file_quarantine", &target.path);
+
+            if !agent_state.should_allow_response_action(
+                &incident_key_value,
+                &action_key,
+                Utc::now(),
+                RESPONSE_ACTION_COOLDOWN_SECONDS,
+            ) {
+                out.push(build_response_event(
+                    "response_suppressed_by_cooldown",
+                    json!({
+                        "action": "file_quarantine",
+                        "original_event_type": event.event_type,
+                        "incident_key": incident_key_value,
+                        "action_key": action_key,
+                        "path": target.path,
+                        "selection_reason": target.selection_reason,
+                        "reason": "Response action suppressed because the same incident/target pair is still in cooldown"
+                    }),
+                ));
+                continue;
+            }
+
             let classified_path_kind = path_kind(&target.path);
 
             let request = FileQuarantineRequest {
@@ -114,6 +183,8 @@ pub fn handle_detection(event: &TelemetryEvent, policy: &ResponsePolicy) -> Resu
                             "response_simulated_file_quarantine",
                             json!({
                                 "original_event_type": event.event_type,
+                                "incident_key": incident_key_value,
+                                "action_key": action_key,
                                 "path": target.path,
                                 "path_kind": classified_path_kind,
                                 "score": score,
@@ -122,11 +193,18 @@ pub fn handle_detection(event: &TelemetryEvent, policy: &ResponsePolicy) -> Resu
                                 "reason": "Policy threshold met for file quarantine, but simulation mode is enabled"
                             }),
                         ));
+                        agent_state.record_response_action(
+                            &incident_key_value,
+                            &action_key,
+                            Utc::now(),
+                        );
                     } else if let Some(new_path) = quarantine_file(&target.path)? {
                         out.push(build_response_event(
                             "response_file_quarantined",
                             json!({
                                 "original_event_type": event.event_type,
+                                "incident_key": incident_key_value,
+                                "action_key": action_key,
                                 "old_path": target.path,
                                 "new_path": new_path,
                                 "path_kind": classified_path_kind,
@@ -135,6 +213,11 @@ pub fn handle_detection(event: &TelemetryEvent, policy: &ResponsePolicy) -> Resu
                                 "selection_reason": target.selection_reason
                             }),
                         ));
+                        agent_state.record_response_action(
+                            &incident_key_value,
+                            &action_key,
+                            Utc::now(),
+                        );
                     }
                 }
                 Err(reason) => {
@@ -143,6 +226,8 @@ pub fn handle_detection(event: &TelemetryEvent, policy: &ResponsePolicy) -> Resu
                         json!({
                             "action": "file_quarantine",
                             "original_event_type": event.event_type,
+                            "incident_key": incident_key_value,
+                            "action_key": action_key,
                             "score": score,
                             "confidence": confidence,
                             "path": target.path,
