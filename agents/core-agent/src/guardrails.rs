@@ -6,11 +6,13 @@ use std::path::Path;
 pub struct ProcessKillRequest<'a> {
     pub pid: i32,
     pub process_kind: Option<&'a str>,
-    pub path: Option<&'a str>,
+    pub associated_path: Option<&'a str>,
     pub score: u8,
     pub original_event_type: &'a str,
     pub chain_root_pid: Option<i32>,
     pub is_root_process: bool,
+    pub attack_chain_length: usize,
+    pub confidence: Option<&'a str>,
 }
 
 #[derive(Debug, Clone)]
@@ -19,6 +21,8 @@ pub struct FileQuarantineRequest<'a> {
     pub score: u8,
     pub original_event_type: &'a str,
     pub path_kind: &'a str,
+    pub confidence: Option<&'a str>,
+    pub attack_chain_length: usize,
 }
 
 pub fn file_extension(path: &str) -> String {
@@ -102,21 +106,27 @@ pub fn should_allow_file_quarantine(
     }
 
     let ext = file_extension(request.path);
-    let is_high_risk_ext = matches!(
+    let high_risk_ext = matches!(
         ext.as_str(),
-        "app" | "pkg" | "dmg" | "xip" | "sh" | "command" | "py" | "js" | "scpt" | "jar" | "bin"
+        "app" | "pkg" | "dmg" | "xip" | "zip" | "sh" | "command" | "py" | "js" | "scpt" | "jar" | "bin"
     );
 
-    if request.path_kind != "downloads" && !is_high_risk_ext && request.score < 90 {
-        return Err(format!(
-            "quarantine outside Downloads requires either a high-risk extension or score >= 90 (got score {})",
-            request.score
-        ));
-    }
+    let high_confidence = matches!(request.confidence, Some("high"));
 
     if request.original_event_type != "alert_behavioral_incident" && request.score < 85 {
         return Err(format!(
             "file quarantine for non-incident alerts requires score >= 85 (got score {})",
+            request.score
+        ));
+    }
+
+    if request.path_kind != "downloads"
+        && !high_risk_ext
+        && !(high_confidence && request.attack_chain_length >= 2)
+        && request.score < 92
+    {
+        return Err(format!(
+            "quarantine outside Downloads requires a high-risk extension, or high-confidence chain context, or score >= 92 (got score {})",
             request.score
         ));
     }
@@ -135,7 +145,7 @@ pub fn should_allow_process_kill(
         ));
     }
 
-    if let Some(path) = request.path {
+    if let Some(path) = request.associated_path {
         if path_kind_is_safe(path, policy) {
             return Err(format!(
                 "associated path kind {} is protected by response guardrails",
@@ -144,23 +154,26 @@ pub fn should_allow_process_kill(
         }
     }
 
-    if request.is_root_process && request.score < 95 {
-        return Err(format!(
-            "root-process kill requires score >= 95 (got score {})",
-            request.score
-        ));
-    }
-
-    if request.process_kind.is_none() && request.path.is_none() && request.score < 92 {
-        return Err(format!(
-            "unclassified process kill requires score >= 92 when no path context exists (got score {})",
-            request.score
-        ));
-    }
-
     if request.original_event_type != "alert_behavioral_incident" && request.score < 90 {
         return Err(format!(
             "process kill for non-incident alerts requires score >= 90 (got score {})",
+            request.score
+        ));
+    }
+
+    if request.is_root_process {
+        let high_confidence = matches!(request.confidence, Some("high"));
+        if request.score < 95 && !(high_confidence && request.attack_chain_length >= 3) {
+            return Err(format!(
+                "root-process kill requires score >= 95 or high-confidence deep-chain context (got score {})",
+                request.score
+            ));
+        }
+    }
+
+    if request.process_kind.is_none() && request.associated_path.is_none() && request.score < 92 {
+        return Err(format!(
+            "unclassified process kill requires score >= 92 when no path context exists (got score {})",
             request.score
         ));
     }

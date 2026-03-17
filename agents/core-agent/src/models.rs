@@ -55,6 +55,42 @@ impl AlertSeverity {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncidentScoreComponent {
+    pub name: String,
+    pub points: u8,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncidentScoreBreakdown {
+    pub total_score: u8,
+    pub confidence: String,
+    pub severity: String,
+    pub attack_chain_length: usize,
+    pub signal_count: usize,
+    pub components: Vec<IncidentScoreComponent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncidentTimelineStep {
+    pub timestamp: DateTime<Utc>,
+    pub event_type: String,
+    pub title: String,
+    pub description: String,
+    pub path: Option<String>,
+    pub pid: Option<i32>,
+    pub parent_pid: Option<i32>,
+    pub score: Option<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncidentNarrative {
+    pub summary: String,
+    pub short_story: String,
+    pub attack_chain_label: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct FileSnapshot {
     pub modified_unix_seconds: i64,
