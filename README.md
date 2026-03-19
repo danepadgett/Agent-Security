@@ -101,3 +101,11 @@ Agent-Security/
 │   └── logs/                # JSONL telemetry output
 ├── docs/                    # Architecture + design docs (planned)
 └── README.md
+
+## Additional Documentation
+
+- [`docs/repo-map.md`](docs/repo-map.md) — repository structure and file guide
+- [`docs/architecture.md`](docs/architecture.md) — platform architecture
+- [`docs/detection-model.md`](docs/detection-model.md) — detection philosophy and model
+- [`docs/response-model.md`](docs/response-model.md) — response logic and guardrails
+- [`docs/roadmap.md`](docs/roadmap.md) — current priorities and long-term direction
