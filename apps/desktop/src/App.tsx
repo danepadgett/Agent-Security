@@ -14,8 +14,8 @@ type Storyline = {
   key: string;
   title: string;
   severity: "critical" | "high" | "medium" | "info";
-  events: TelemetryEvent[];
   summary: string;
+  events: TelemetryEvent[];
   lastSeen: number;
 };
 
@@ -32,9 +32,9 @@ function getTimestampMs(value: number | string | undefined): number {
   }
 
   if (typeof value === "string") {
-    const asNumber = Number(value);
-    if (!Number.isNaN(asNumber) && value.trim() !== "") {
-      return asNumber < 10_000_000_000 ? asNumber * 1000 : asNumber;
+    const numeric = Number(value);
+    if (!Number.isNaN(numeric) && value.trim() !== "") {
+      return numeric < 10_000_000_000 ? numeric * 1000 : numeric;
     }
 
     const parsed = Date.parse(value);
@@ -49,17 +49,7 @@ function getTimestampMs(value: number | string | undefined): number {
 function formatTimestamp(value: number | string | undefined): string {
   const ms = getTimestampMs(value);
   if (!ms) return String(value ?? "unknown");
-
   return new Date(ms).toLocaleString();
-}
-
-function humanizeEventType(eventType: string): string {
-  return eventType
-    .replace(/^alert_/, "")
-    .replace(/^response_/, "")
-    .replace(/^agent_/, "")
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function asString(value: unknown): string | null {
@@ -75,216 +65,19 @@ function asNumber(value: unknown): number | null {
   return null;
 }
 
-function payloadRecord(value: unknown): Record<string, unknown> | null {
+function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
 }
 
-function eventSeverity(event: TelemetryEvent): Storyline["severity"] {
-  const payloadSeverity = asString(event.payload?.severity)?.toLowerCase();
-  if (payloadSeverity === "critical") return "critical";
-  if (payloadSeverity === "high") return "high";
-  if (payloadSeverity === "medium") return "medium";
-
-  const score =
-    asNumber(event.payload?.score) ??
-    asNumber(payloadRecord(event.payload?.details)?.score) ??
-    asNumber(payloadRecord(event.payload?.details)?.confidence);
-
-  if (event.event_type === "alert_behavioral_incident") return "critical";
-  if (event.event_type.startsWith("response_")) return "high";
-  if (event.event_type.startsWith("alert_")) {
-    if ((score ?? 0) >= 90) return "critical";
-    if ((score ?? 0) >= 75) return "high";
-    return "medium";
-  }
-
-  return "info";
-}
-
-function extractPrimaryPath(event: TelemetryEvent): string | null {
-  const details = payloadRecord(event.payload?.details);
-
-  return (
-    asString(event.payload?.path) ??
-    asString(details?.primary_path) ??
-    asString(event.payload?.matched_download) ??
-    asString(event.payload?.quarantine_path) ??
-    asString(event.payload?.original_path)
-  );
-}
-
-function extractGroupingKey(event: TelemetryEvent): string | null {
-  const details = payloadRecord(event.payload?.details);
-
-  return (
-    asString(details?.grouping_key) ??
-    extractPrimaryPath(event) ??
-    asString(event.payload?.action_key) ??
-    (() => {
-      const pid = asNumber(event.payload?.pid);
-      return pid !== null ? `pid:${pid}` : null;
-    })() ??
-    (() => {
-      const childPid = asNumber(event.payload?.child_pid);
-      return childPid !== null ? `pid:${childPid}` : null;
-    })() ??
-    (() => {
-      const chainRootPid = asNumber(details?.chain_root_pid);
-      return chainRootPid !== null ? `chain:${chainRootPid}` : null;
-    })() ??
-    (event.event_type === "agent_state_snapshot" ? "agent_state" : null)
-  );
-}
-
-function extractStoryTitle(key: string, events: TelemetryEvent[]): string {
-  const incident = events.find((event) => event.event_type === "alert_behavioral_incident");
-  if (incident) {
-    return "Behavioral Incident";
-  }
-
-  const response = events.find((event) => event.event_type.startsWith("response_"));
-  if (response) {
-    return humanizeEventType(response.event_type);
-  }
-
-  if (key === "agent_state") {
-    return "Agent State Snapshot";
-  }
-
-  if (key.startsWith("pid:")) {
-    return `Process ${key.replace("pid:", "")}`;
-  }
-
-  if (key.startsWith("chain:")) {
-    return `Execution Chain ${key.replace("chain:", "")}`;
-  }
-
-  const pathSegments = key.split("/");
-  const tail = pathSegments[pathSegments.length - 1];
-  return tail || key;
-}
-
-function eventSummary(event: TelemetryEvent): string {
-  const details = payloadRecord(event.payload?.details);
-
-  if (event.event_type === "alert_behavioral_incident") {
-    const reason = asString(event.payload?.reason);
-    const score = asNumber(event.payload?.score);
-    const signalCount = asNumber(details?.signal_count);
-    const chainLength = asNumber(details?.attack_chain_length);
-
-    return [
-      reason ?? "Behavioral incident detected",
-      score !== null ? `score=${score}` : null,
-      signalCount !== null ? `signals=${signalCount}` : null,
-      chainLength !== null ? `chain_length=${chainLength}` : null,
-    ]
-      .filter(Boolean)
-      .join(" • ");
-  }
-
-  if (event.event_type.startsWith("response_")) {
-    const reason = asString(event.payload?.reason);
-    const actionKey = asString(event.payload?.action_key);
-    const path = asString(event.payload?.path);
-    const pid = asNumber(event.payload?.pid);
-
-    return [
-      reason ?? humanizeEventType(event.event_type),
-      actionKey ? `action=${actionKey}` : null,
-      path ? `path=${path}` : null,
-      pid !== null ? `pid=${pid}` : null,
-    ]
-      .filter(Boolean)
-      .join(" • ");
-  }
-
-  if (event.event_type.startsWith("alert_")) {
-    const title = asString(event.payload?.title);
-    const summary = asString(event.payload?.summary);
-    const reason = asString(event.payload?.reason);
-    const score = asNumber(event.payload?.score);
-
-    return [
-      title ?? summary ?? reason ?? humanizeEventType(event.event_type),
-      score !== null ? `score=${score}` : null,
-    ]
-      .filter(Boolean)
-      .join(" • ");
-  }
-
-  switch (event.event_type) {
-    case "file_created":
-    case "file_modified":
-    case "file_deleted":
-    case "file_became_executable": {
-      const path = extractPrimaryPath(event);
-      return path ? `${humanizeEventType(event.event_type)} • ${path}` : humanizeEventType(event.event_type);
-    }
-
-    case "process_started": {
-      const command = asString(event.payload?.command) ?? asString(event.payload?.args);
-      const pid = asNumber(event.payload?.pid);
-      return [
-        command ?? "Process started",
-        pid !== null ? `pid=${pid}` : null,
-      ]
-        .filter(Boolean)
-        .join(" • ");
-    }
-
-    case "agent_state_snapshot": {
-      const normalized = payloadRecord(event.payload?.normalized_summary);
-      const activeIncidents = asNumber(normalized?.active_incidents);
-      const responseCooldowns = asNumber(normalized?.active_response_cooldowns);
-
-      return [
-        "Periodic agent state summary",
-        activeIncidents !== null ? `active_incidents=${activeIncidents}` : null,
-        responseCooldowns !== null ? `response_cooldowns=${responseCooldowns}` : null,
-      ]
-        .filter(Boolean)
-        .join(" • ");
-    }
-
-    default:
-      return humanizeEventType(event.event_type);
-  }
-}
-
-function buildStorySummary(events: TelemetryEvent[]): string {
-  const sorted = [...events].sort(
-    (a, b) => getTimestampMs(a.timestamp) - getTimestampMs(b.timestamp)
-  );
-
-  const incident = sorted.find((event) => event.event_type === "alert_behavioral_incident");
-  if (incident) {
-    return (
-      asString(incident.payload?.reason) ??
-      "Multiple high-signal detections were correlated into a behavioral incident."
-    );
-  }
-
-  const highestSeverity = sorted
-    .map(eventSeverity)
-    .sort((a, b) => severityRank(b) - severityRank(a))[0];
-
-  const alertCount = sorted.filter((event) => event.event_type.startsWith("alert_")).length;
-  const responseCount = sorted.filter((event) => event.event_type.startsWith("response_")).length;
-  const fileCount = sorted.filter((event) => event.event_type.startsWith("file_")).length;
-  const processCount = sorted.filter((event) => event.event_type === "process_started").length;
-
-  if (responseCount > 0) {
-    return `Observed ${alertCount} alert(s), ${responseCount} response action(s), ${fileCount} file event(s), and ${processCount} process event(s). Highest severity: ${highestSeverity}.`;
-  }
-
-  if (alertCount > 0) {
-    return `Observed ${alertCount} alert(s), ${fileCount} file event(s), and ${processCount} process event(s). Highest severity: ${highestSeverity}.`;
-  }
-
-  return `Observed ${fileCount} file event(s) and ${processCount} process event(s).`;
+function humanizeEventType(eventType: string): string {
+  return eventType
+    .replace(/^alert_/, "")
+    .replace(/^response_/, "")
+    .replace(/^agent_/, "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function severityRank(severity: Storyline["severity"]): number {
@@ -295,7 +88,6 @@ function severityRank(severity: Storyline["severity"]): number {
       return 3;
     case "medium":
       return 2;
-    case "info":
     default:
       return 1;
   }
@@ -306,6 +98,176 @@ function mergeSeverity(
   right: Storyline["severity"]
 ): Storyline["severity"] {
   return severityRank(left) >= severityRank(right) ? left : right;
+}
+
+function eventSeverity(event: TelemetryEvent): Storyline["severity"] {
+  const payload = event.payload ?? {};
+  const severity = asString(payload.severity)?.toLowerCase();
+  const outcome = asString(payload.outcome)?.toLowerCase();
+  const score = asNumber(payload.score);
+
+  if (event.event_type === "alert_behavioral_incident") return "critical";
+
+  if (severity === "critical") return "critical";
+  if (severity === "high") return "high";
+  if (severity === "medium") return "medium";
+
+  if (event.event_type.startsWith("response_")) {
+    if (outcome === "failed") return "high";
+    if (outcome === "executed") return "high";
+    if (outcome === "blocked") return "medium";
+    if (outcome === "suppressed") return "info";
+    if (outcome === "simulated") return "medium";
+    return "medium";
+  }
+
+  if (event.event_type.startsWith("alert_")) {
+    if ((score ?? 0) >= 90) return "critical";
+    if ((score ?? 0) >= 75) return "high";
+    return "medium";
+  }
+
+  return "info";
+}
+
+function extractPath(event: TelemetryEvent): string | null {
+  const payload = event.payload ?? {};
+  return (
+    asString(payload.path) ??
+    asString(payload.old_path) ??
+    asString(payload.new_path) ??
+    asString(payload.primary_path) ??
+    asString(payload.matched_download_path) ??
+    null
+  );
+}
+
+function extractGroupKey(event: TelemetryEvent): string | null {
+  const payload = event.payload ?? {};
+
+  return (
+    asString(payload.incident_key) ??
+    extractPath(event) ??
+    asString(payload.action_key) ??
+    (() => {
+      const pid = asNumber(payload.pid);
+      return pid !== null ? `pid:${pid}` : null;
+    })() ??
+    (event.event_type === "agent_state_snapshot" ? "agent_state" : null)
+  );
+}
+
+function extractStoryTitle(key: string, events: TelemetryEvent[]): string {
+  const incident = events.find((event) => event.event_type === "alert_behavioral_incident");
+  if (incident) return "Behavioral Incident";
+
+  const response = events.find((event) => event.event_type.startsWith("response_"));
+  if (response) {
+    const action = asString(response.payload.action);
+    return action ? `Response: ${action.replace(/_/g, " ")}` : "Response Activity";
+  }
+
+  if (key === "agent_state") return "Agent State Snapshot";
+  if (key.startsWith("pid:")) return `Process ${key.slice(4)}`;
+
+  const tail = key.split("/").pop();
+  return tail || key;
+}
+
+function eventSummary(event: TelemetryEvent): string {
+  const payload = event.payload ?? {};
+
+  if (event.event_type === "alert_behavioral_incident") {
+    return [
+      asString(payload.reason) ?? "Behavioral incident detected",
+      asNumber(payload.score) !== null ? `score=${asNumber(payload.score)}` : null,
+    ]
+      .filter(Boolean)
+      .join(" • ");
+  }
+
+  if (event.event_type.startsWith("response_")) {
+    return [
+      asString(payload.action),
+      asString(payload.outcome),
+      asString(payload.target_type),
+      asNumber(payload.pid) !== null ? `pid=${asNumber(payload.pid)}` : null,
+      asString(payload.path) ??
+        asString(payload.old_path) ??
+        asString(payload.new_path) ??
+        null,
+      asString(payload.reason),
+    ]
+      .filter(Boolean)
+      .join(" • ");
+  }
+
+  if (event.event_type.startsWith("alert_")) {
+    return [
+      asString(payload.title) ?? asString(payload.reason) ?? humanizeEventType(event.event_type),
+      asNumber(payload.score) !== null ? `score=${asNumber(payload.score)}` : null,
+      extractPath(event),
+    ]
+      .filter(Boolean)
+      .join(" • ");
+  }
+
+  if (event.event_type === "process_started") {
+    return [
+      asString(payload.command) ?? "process",
+      asString(payload.args),
+      asString(payload.process_kind),
+      asNumber(payload.pid) !== null ? `pid=${asNumber(payload.pid)}` : null,
+    ]
+      .filter(Boolean)
+      .join(" • ");
+  }
+
+  if (event.event_type.startsWith("file_")) {
+    return [
+      humanizeEventType(event.event_type),
+      extractPath(event),
+    ]
+      .filter(Boolean)
+      .join(" • ");
+  }
+
+  if (event.event_type === "agent_state_snapshot") {
+    const normalized = asRecord(payload.normalized_summary);
+    return [
+      "Periodic state snapshot",
+      asNumber(normalized?.active_incidents) !== null
+        ? `active_incidents=${asNumber(normalized?.active_incidents)}`
+        : null,
+      asNumber(normalized?.active_response_cooldowns) !== null
+        ? `response_cooldowns=${asNumber(normalized?.active_response_cooldowns)}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" • ");
+  }
+
+  return humanizeEventType(event.event_type);
+}
+
+function buildStorySummary(events: TelemetryEvent[]): string {
+  const alertCount = events.filter((event) => event.event_type.startsWith("alert_")).length;
+  const responseCount = events.filter((event) => event.event_type.startsWith("response_")).length;
+  const fileCount = events.filter((event) => event.event_type.startsWith("file_")).length;
+  const processCount = events.filter((event) => event.event_type === "process_started").length;
+  const strongest = events
+    .map(eventSeverity)
+    .sort((a, b) => severityRank(b) - severityRank(a))[0];
+
+  return [
+    alertCount > 0 ? `${alertCount} alert(s)` : null,
+    responseCount > 0 ? `${responseCount} response(s)` : null,
+    fileCount > 0 ? `${fileCount} file event(s)` : null,
+    processCount > 0 ? `${processCount} process event(s)` : null,
+    strongest ? `highest=${strongest}` : null,
+  ]
+    .filter(Boolean)
+    .join(" • ");
 }
 
 function App() {
@@ -331,7 +293,6 @@ function App() {
 
   useEffect(() => {
     loadEvents();
-
     const interval = setInterval(loadEvents, 2000);
     return () => clearInterval(interval);
   }, []);
@@ -347,18 +308,18 @@ function App() {
   }, [events]);
 
   const storylines = useMemo<Storyline[]>(() => {
-    const groups = new Map<string, TelemetryEvent[]>();
+    const grouped = new Map<string, TelemetryEvent[]>();
 
     for (const event of events) {
-      const key = extractGroupingKey(event);
+      const key = extractGroupKey(event);
       if (!key) continue;
 
-      const existing = groups.get(key) ?? [];
-      existing.push(event);
-      groups.set(key, existing);
+      const current = grouped.get(key) ?? [];
+      current.push(event);
+      grouped.set(key, current);
     }
 
-    return Array.from(groups.entries())
+    return Array.from(grouped.entries())
       .map(([key, groupedEvents]) => {
         const sortedEvents = [...groupedEvents].sort(
           (a, b) => getTimestampMs(a.timestamp) - getTimestampMs(b.timestamp)
@@ -373,8 +334,8 @@ function App() {
           key,
           title: extractStoryTitle(key, sortedEvents),
           severity,
-          events: sortedEvents,
           summary: buildStorySummary(sortedEvents),
+          events: sortedEvents,
           lastSeen: getTimestampMs(sortedEvents[sortedEvents.length - 1]?.timestamp),
         };
       })
@@ -387,78 +348,58 @@ function App() {
 
   return (
     <main className="container">
-      <h1>Agent Security Console</h1>
-      <p className="subtitle">Local telemetry, detections, incidents, and automated response</p>
+      <header className="page-header">
+        <div>
+          <h1>Agent Security Console</h1>
+          <p className="subtitle">
+            Local telemetry, detections, incidents, and response history
+          </p>
+        </div>
 
-      <div className="toolbar">
-        <button onClick={loadEvents}>Refresh</button>
-      </div>
+        <button className="refresh-button" onClick={loadEvents}>
+          Refresh
+        </button>
+      </header>
 
-      {error ? <div className="error">{error}</div> : null}
+      {error ? <div className="error-banner">{error}</div> : null}
 
-      <section className="storylines-section">
-        <h2>Overview</h2>
-        <div className="storylines">
-          <div className="story-card">
-            <div className="story-header">
-              <div>
-                <div className="story-title">Total Events</div>
-                <div className="story-summary">{stats.totalEvents}</div>
-              </div>
-              <div className="severity-pill severity-info">INFO</div>
-            </div>
-          </div>
+      <section className="stats-grid">
+        <div className="stat-card">
+          <div className="stat-label">Total Events</div>
+          <div className="stat-value">{stats.totalEvents}</div>
+        </div>
 
-          <div className="story-card story-card-alert">
-            <div className="story-header">
-              <div>
-                <div className="story-title">Alerts</div>
-                <div className="story-summary">{stats.totalAlerts}</div>
-              </div>
-              <div className="severity-pill severity-high">HIGH</div>
-            </div>
-          </div>
+        <div className="stat-card">
+          <div className="stat-label">Alerts</div>
+          <div className="stat-value">{stats.totalAlerts}</div>
+        </div>
 
-          <div className="story-card story-card-alert">
-            <div className="story-header">
-              <div>
-                <div className="story-title">Behavioral Incidents</div>
-                <div className="story-summary">{stats.totalIncidents}</div>
-              </div>
-              <div className="severity-pill severity-critical">CRITICAL</div>
-            </div>
-          </div>
+        <div className="stat-card">
+          <div className="stat-label">Behavioral Incidents</div>
+          <div className="stat-value">{stats.totalIncidents}</div>
+        </div>
 
-          <div className="story-card">
-            <div className="story-header">
-              <div>
-                <div className="story-title">Response Actions</div>
-                <div className="story-summary">{stats.totalResponses}</div>
-              </div>
-              <div className="severity-pill severity-medium">MEDIUM</div>
-            </div>
-          </div>
+        <div className="stat-card">
+          <div className="stat-label">Responses</div>
+          <div className="stat-value">{stats.totalResponses}</div>
         </div>
       </section>
 
-      <section className="storylines-section">
-        <h2>Storylines</h2>
+      <section className="panel">
+        <div className="panel-header">
+          <h2>Storylines</h2>
+        </div>
 
         {storylines.length === 0 ? (
-          <div className="empty">No storylines yet.</div>
+          <div className="empty-state">No storylines yet.</div>
         ) : (
-          <div className="storylines">
+          <div className="storyline-list">
             {storylines.map((story) => (
-              <div
-                key={story.key}
-                className={`story-card ${
-                  severityRank(story.severity) >= severityRank("high") ? "story-card-alert" : ""
-                }`}
-              >
-                <div className="story-header">
+              <article className="story-card" key={story.key}>
+                <div className="story-card-top">
                   <div>
                     <div className="story-title">{story.title}</div>
-                    <div className="story-path">{story.key}</div>
+                    <div className="story-key">{story.key}</div>
                     <div className="story-summary">{story.summary}</div>
                   </div>
 
@@ -472,60 +413,49 @@ function App() {
                     <div className="story-event-row" key={event.id}>
                       <div className="story-event-time">{formatTimestamp(event.timestamp)}</div>
                       <div className="story-event-type">{event.event_type}</div>
-                      <div className="story-event-summary">
-                        {event.event_type.startsWith("alert_") ||
-                        event.event_type.startsWith("response_") ? (
-                          <strong>{eventSummary(event)}</strong>
-                        ) : (
-                          eventSummary(event)
-                        )}
-                      </div>
+                      <div className="story-event-summary">{eventSummary(event)}</div>
                     </div>
                   ))}
                 </div>
-              </div>
+              </article>
             ))}
           </div>
         )}
       </section>
 
-      <section className="raw-events-section">
-        <h2>Raw Events</h2>
-
-        <div className="events">
-          {events.length === 0 ? (
-            <div className="empty">No agent events found yet.</div>
-          ) : (
-            [...events].reverse().map((event) => {
-              const severity = eventSeverity(event);
-              const isElevated = severityRank(severity) >= severityRank("high");
-
-              return (
-                <div
-                  className={`event-card ${isElevated ? "alert-card" : ""}`}
-                  key={event.id}
-                >
-                  <div>
-                    <strong>ID:</strong> {event.id}
-                  </div>
-                  <div>
-                    <strong>Timestamp:</strong> {formatTimestamp(event.timestamp)}
-                  </div>
-                  <div>
-                    <strong>Type:</strong> {event.event_type}
-                  </div>
-                  <div>
-                    <strong>Source:</strong> {event.source}
-                  </div>
-                  <div>
-                    <strong>Summary:</strong> {eventSummary(event)}
-                  </div>
-                  <pre>{JSON.stringify(event.payload, null, 2)}</pre>
-                </div>
-              );
-            })
-          )}
+      <section className="panel">
+        <div className="panel-header">
+          <h2>Raw Events</h2>
         </div>
+
+        {events.length === 0 ? (
+          <div className="empty-state">No agent events found yet.</div>
+        ) : (
+          <div className="raw-event-list">
+            {[...events].reverse().map((event) => {
+              const severity = eventSeverity(event);
+              return (
+                <article className="raw-event-card" key={event.id}>
+                  <div className="raw-event-top">
+                    <div>
+                      <div className="raw-event-type">{event.event_type}</div>
+                      <div className="raw-event-meta">
+                        {formatTimestamp(event.timestamp)} • {event.source}
+                      </div>
+                    </div>
+
+                    <div className={`severity-pill severity-${severity}`}>
+                      {severity.toUpperCase()}
+                    </div>
+                  </div>
+
+                  <div className="raw-event-summary">{eventSummary(event)}</div>
+                  <pre className="payload-block">{JSON.stringify(event.payload, null, 2)}</pre>
+                </article>
+              );
+            })}
+          </div>
+        )}
       </section>
     </main>
   );
