@@ -1,9 +1,10 @@
 use std::path::Path;
 
 pub fn classify_path(path: &str) -> String {
-    let lower = path.to_ascii_lowercase();
+    let normalized = normalize_token(path);
+    let lower = normalized.to_ascii_lowercase();
 
-    if is_persistence_path(path) {
+    if is_persistence_path(&lower) {
         return "persistence".to_string();
     }
 
@@ -29,10 +30,7 @@ pub fn classify_path(path: &str) -> String {
         return "system".to_string();
     }
 
-    if lower.contains("/applications/")
-        || lower.ends_with(".app")
-        || lower.contains(".app/")
-    {
+    if lower.contains("/applications/") || lower.ends_with(".app") || lower.contains(".app/") {
         return "user_app".to_string();
     }
 
@@ -40,26 +38,30 @@ pub fn classify_path(path: &str) -> String {
 }
 
 pub fn classify_process_command(command: &str) -> String {
-    let lower = basename(command);
+    let normalized = normalize_token(command);
+    let lower = normalized.to_ascii_lowercase();
+    let base = basename(&normalized);
 
-    if is_browser_command(command) {
+    if is_browser_command(&normalized) {
         return "browser".to_string();
     }
 
-    if is_script_interpreter(command) || is_network_tool(command) || is_persistence_tool_command(command)
+    if is_script_interpreter(&normalized)
+        || is_network_tool(&normalized)
+        || is_persistence_tool_command(&normalized)
     {
         return "interpreter".to_string();
     }
 
-    if command.starts_with("/System/")
-        || command.starts_with("/usr/")
-        || command.starts_with("/bin/")
-        || command.starts_with("/sbin/")
+    if lower.starts_with("/system/")
+        || lower.starts_with("/usr/")
+        || lower.starts_with("/bin/")
+        || lower.starts_with("/sbin/")
     {
         return "system".to_string();
     }
 
-    if command.contains("/Applications/") || lower.ends_with(".app") {
+    if lower.contains("/applications/") || base.ends_with(".app") {
         return "user_app".to_string();
     }
 
@@ -68,24 +70,35 @@ pub fn classify_process_command(command: &str) -> String {
 
 pub fn is_script_interpreter(command: &str) -> bool {
     matches!(
-        basename(command).as_str(),
-        "bash" | "sh" | "zsh" | "python" | "python3" | "osascript" | "perl" | "ruby" | "node"
+        basename(&normalize_token(command)).as_str(),
+        "bash"
+            | "sh"
+            | "zsh"
+            | "dash"
+            | "ksh"
+            | "fish"
+            | "python"
+            | "python3"
+            | "osascript"
+            | "perl"
+            | "ruby"
+            | "node"
     )
 }
 
 pub fn is_network_tool(command: &str) -> bool {
-    matches!(basename(command).as_str(), "curl" | "wget")
+    matches!(basename(&normalize_token(command)).as_str(), "curl" | "wget")
 }
 
 pub fn is_persistence_tool_command(command: &str) -> bool {
     matches!(
-        basename(command).as_str(),
+        basename(&normalize_token(command)).as_str(),
         "launchctl" | "crontab" | "osascript" | "defaults"
     )
 }
 
 pub fn is_persistence_path(path: &str) -> bool {
-    let lower = path.to_ascii_lowercase();
+    let lower = normalize_token(path).to_ascii_lowercase();
 
     lower.contains("/library/launchagents/")
         || lower.contains("/library/launchdaemons/")
@@ -94,15 +107,15 @@ pub fn is_persistence_path(path: &str) -> bool {
         || lower.starts_with("/usr/lib/cron/tabs/")
         || lower.starts_with("/private/var/at/tabs/")
         || lower.contains("/library/preferences/com.apple.loginwindow.plist")
-        || lower.ends_with(".plist")
+        || (lower.ends_with(".plist")
             && (lower.contains("/launchagents/")
                 || lower.contains("/launchdaemons/")
-                || lower.contains("loginwindow"))
+                || lower.contains("loginwindow")))
 }
 
 pub fn is_browser_command(command: &str) -> bool {
     matches!(
-        basename(command).as_str(),
+        basename(&normalize_token(command)).as_str(),
         "safari"
             | "google chrome"
             | "chrome"
@@ -116,7 +129,7 @@ pub fn is_browser_command(command: &str) -> bool {
 }
 
 pub fn is_benign_developer_tool_command(command: &str, args: &str) -> bool {
-    let name = basename(command);
+    let name = basename(&normalize_token(command));
     let args_lower = args.to_ascii_lowercase();
 
     match name.as_str() {
@@ -140,7 +153,7 @@ pub fn is_benign_developer_tool_command(command: &str, args: &str) -> bool {
 }
 
 pub fn is_benign_admin_tool_command(command: &str, args: &str) -> bool {
-    let name = basename(command);
+    let name = basename(&normalize_token(command));
     let args_lower = args.to_ascii_lowercase();
 
     match name.as_str() {
@@ -160,4 +173,20 @@ fn basename(path: &str) -> String {
         .and_then(|name| name.to_str())
         .unwrap_or(path)
         .to_ascii_lowercase()
+}
+
+fn normalize_token(value: &str) -> String {
+    let trimmed = value.trim();
+
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let without_parens = trimmed
+        .strip_prefix('(')
+        .and_then(|s| s.strip_suffix(')'))
+        .unwrap_or(trimmed)
+        .trim();
+
+    without_parens.to_string()
 }

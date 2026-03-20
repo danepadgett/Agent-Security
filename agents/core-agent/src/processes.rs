@@ -96,18 +96,26 @@ fn enrich_with_parent_context(
         .map(|(key, raw)| {
             let parent = pid_lookup.get(&raw.ppid);
 
+            let normalized_command = normalize_command_token(&raw.command);
+            let normalized_parent_command =
+                parent.map(|p| normalize_command_token(&p.command));
+
             let process = ProcessInfo {
                 pid: raw.pid,
                 ppid: raw.ppid,
-                command: raw.command.clone(),
+                command: normalized_command.clone(),
                 args: raw.args.clone(),
-                process_kind: classify_process_command(&raw.command),
-                command_path_kind: classify_path(&raw.command),
-                parent_command: parent.map(|p| p.command.clone()),
+                process_kind: classify_process_command(&normalized_command),
+                command_path_kind: classify_path(&normalized_command),
+                parent_command: normalized_parent_command.clone(),
                 parent_args: parent.map(|p| p.args.clone()),
-                parent_process_kind: parent.map(|p| classify_process_command(&p.command)),
-                parent_command_path_kind: parent.map(|p| classify_path(&p.command)),
-                behavior: extract_features(&raw.command, &raw.args),
+                parent_process_kind: normalized_parent_command
+                    .as_ref()
+                    .map(|cmd| classify_process_command(cmd)),
+                parent_command_path_kind: normalized_parent_command
+                    .as_ref()
+                    .map(|cmd| classify_path(cmd)),
+                behavior: extract_features(&normalized_command, &raw.args),
             };
 
             (key, process)
@@ -135,9 +143,7 @@ fn parse_ps_line(line: &str) -> Option<(ProcessKey, RawProcessInfo)> {
         return None;
     }
 
-    let mut split = command_and_args.splitn(2, ' ');
-    let command = split.next().unwrap_or("").to_string();
-    let args = split.next().unwrap_or("").to_string();
+    let (command, args) = split_command_and_args(&command_and_args);
 
     let key = ProcessKey { pid, start_hint };
     let info = RawProcessInfo {
@@ -150,12 +156,48 @@ fn parse_ps_line(line: &str) -> Option<(ProcessKey, RawProcessInfo)> {
     Some((key, info))
 }
 
+fn split_command_and_args(command_and_args: &str) -> (String, String) {
+    let trimmed = command_and_args.trim();
+
+    if trimmed.is_empty() {
+        return ("".to_string(), "".to_string());
+    }
+
+    if let Some(space_idx) = trimmed.find(' ') {
+        let command = trimmed[..space_idx].trim().to_string();
+        let args = trimmed[space_idx + 1..].trim().to_string();
+        (command, args)
+    } else {
+        (trimmed.to_string(), String::new())
+    }
+}
+
+fn normalize_command_token(command: &str) -> String {
+    let trimmed = command.trim();
+
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let without_parens = trimmed
+        .strip_prefix('(')
+        .and_then(|s| s.strip_suffix(')'))
+        .unwrap_or(trimmed)
+        .trim();
+
+    if without_parens.is_empty() {
+        return trimmed.to_string();
+    }
+
+    without_parens.to_string()
+}
+
 fn should_ignore_raw_process(process: &RawProcessInfo) -> bool {
-    let command = process.command.as_str();
+    let command = normalize_command_token(&process.command);
     let args = process.args.as_str();
 
     let full = if args.is_empty() {
-        command.to_string()
+        command.clone()
     } else {
         format!("{command} {args}")
     };

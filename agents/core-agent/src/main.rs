@@ -203,7 +203,7 @@ fn main() -> Result<()> {
             startup_completed = true;
         }
 
-        thread::sleep(Duration::from_secs(1));
+        thread::sleep(Duration::from_millis(250));
     }
 }
 

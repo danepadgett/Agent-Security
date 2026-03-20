@@ -45,8 +45,110 @@ pub fn evaluate_detections(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
     detections.extend(detect_persistence_tooling_activity(ctx));
     detections.extend(detect_suspicious_persistence_chain(ctx));
     detections.extend(detect_downloaded_installer_activity(ctx));
-
+    detections.extend(detect_rare_interpreter_execution(ctx));
     detections
+}
+
+fn detect_rare_interpreter_execution(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
+    let mut alerts = Vec::new();
+
+    for process in &ctx.recent_processes {
+        let command_lc = process.command.to_lowercase();
+        let args_lc = process.args.to_lowercase();
+
+        let looks_like_interpreter =
+            process.process_kind == "interpreter"
+                || command_lc.contains("bash")
+                || command_lc.contains("zsh")
+                || command_lc.contains("sh")
+                || command_lc.contains("python");
+
+        if !looks_like_interpreter {
+            continue;
+        }
+
+        let seen_count = ctx.baseline.seen_count_for(process);
+        if seen_count >= 3 {
+            continue;
+        }
+
+        let matched_file = ctx.recent_file_events.iter().find(|file_event| {
+            let path_lc = file_event.path.to_lowercase();
+            let basename_lc = file_event
+                .path
+                .rsplit('/')
+                .next()
+                .unwrap_or(&file_event.path)
+                .to_lowercase();
+
+            let age_seconds = ctx
+                .now
+                .signed_duration_since(file_event.timestamp)
+                .num_seconds();
+
+            let is_recent = age_seconds >= 0 && age_seconds <= 15;
+
+            let is_user_space = path_lc.contains("/downloads/")
+                || path_lc.contains("/desktop/")
+                || path_lc.contains("/documents/");
+
+            let looks_script_like = path_lc.ends_with(".sh")
+                || path_lc.ends_with(".py")
+                || path_lc.ends_with(".command")
+                || path_lc.ends_with(".zsh")
+                || path_lc.ends_with(".bash");
+
+            let explicitly_referenced =
+                (!process.args.is_empty() && args_lc.contains(&path_lc))
+                    || (!process.args.is_empty() && args_lc.contains(&basename_lc));
+
+            explicitly_referenced || (is_recent && is_user_space && looks_script_like)
+        });
+
+        let Some(file_event) = matched_file else {
+            continue;
+        };
+
+        let provenance = ctx.provenance.get(&file_event.path);
+
+        let suspicious_origin = match provenance {
+            Some(record) => {
+                let age_seconds = ctx
+                    .now
+                    .signed_duration_since(record.first_seen)
+                    .num_seconds();
+
+                age_seconds <= 300
+                    || record.first_seen_in_downloads
+                    || !record.referenced_urls.is_empty()
+            }
+            None => true,
+        };
+
+        if !suspicious_origin {
+            continue;
+        }
+
+        alerts.push(TelemetryEvent::new(
+            ctx.now,
+            "alert_rare_interpreter_execution",
+            "core-agent/detection",
+            json!({
+                "title": "Rare interpreter execution of newly introduced file",
+                "severity": "high",
+                "score": 85,
+                "pid": process.pid,
+                "command": process.command,
+                "args": process.args,
+                "path": file_event.path,
+                "baseline_seen_count": seen_count,
+                "process_kind": process.process_kind,
+                "reason": "Interpreter-like process executed or closely followed a newly introduced user-space script that appears rare in the local baseline"
+            }),
+        ));
+    }
+
+    alerts
 }
 
 pub fn alert_fingerprint(event: &TelemetryEvent) -> String {
