@@ -32,18 +32,23 @@ pub fn handle_detection(
 
     if policy.enable_process_kill && score >= policy.kill_threshold {
         for target in kill_targets {
+            let action_time = Utc::now();
             let action_key = response_action_key("process_kill", &target.pid.to_string());
 
             if !agent_state.should_allow_response_action(
                 &incident_key_value,
                 &action_key,
-                Utc::now(),
+                action_time,
                 RESPONSE_ACTION_COOLDOWN_SECONDS,
             ) {
                 out.push(build_response_event(
+                    action_time,
                     "response_suppressed_by_cooldown",
                     json!({
                         "action": "process_kill",
+                        "target_type": "process",
+                        "response_mode": response_mode(policy),
+                        "outcome": "suppressed",
                         "original_event_type": event.event_type,
                         "incident_key": incident_key_value,
                         "action_key": action_key,
@@ -71,8 +76,13 @@ pub fn handle_detection(
                 Ok(()) => {
                     if policy.simulation_mode {
                         out.push(build_response_event(
+                            action_time,
                             "response_simulated_process_kill",
                             json!({
+                                "action": "process_kill",
+                                "target_type": "process",
+                                "response_mode": response_mode(policy),
+                                "outcome": "simulated",
                                 "original_event_type": event.event_type,
                                 "incident_key": incident_key_value,
                                 "action_key": action_key,
@@ -90,37 +100,98 @@ pub fn handle_detection(
                         agent_state.record_response_action(
                             &incident_key_value,
                             &action_key,
-                            Utc::now(),
+                            action_time,
                         );
-                    } else if kill_process(target.pid)? {
-                        out.push(build_response_event(
-                            "response_process_killed",
-                            json!({
-                                "original_event_type": event.event_type,
-                                "incident_key": incident_key_value,
-                                "action_key": action_key,
-                                "pid": target.pid,
-                                "score": score,
-                                "confidence": confidence,
-                                "process_kind": target.process_kind,
-                                "associated_path": target.associated_path,
-                                "chain_root_pid": target.chain_root_pid,
-                                "is_root_process": target.is_root_process,
-                                "selection_reason": target.selection_reason
-                            }),
-                        ));
-                        agent_state.record_response_action(
-                            &incident_key_value,
-                            &action_key,
-                            Utc::now(),
-                        );
+                    } else {
+                        match kill_process(target.pid) {
+                            Ok(true) => {
+                                out.push(build_response_event(
+                                    action_time,
+                                    "response_process_killed",
+                                    json!({
+                                        "action": "process_kill",
+                                        "target_type": "process",
+                                        "response_mode": response_mode(policy),
+                                        "outcome": "executed",
+                                        "original_event_type": event.event_type,
+                                        "incident_key": incident_key_value,
+                                        "action_key": action_key,
+                                        "pid": target.pid,
+                                        "score": score,
+                                        "confidence": confidence,
+                                        "process_kind": target.process_kind,
+                                        "associated_path": target.associated_path,
+                                        "chain_root_pid": target.chain_root_pid,
+                                        "is_root_process": target.is_root_process,
+                                        "selection_reason": target.selection_reason
+                                    }),
+                                ));
+                                agent_state.record_response_action(
+                                    &incident_key_value,
+                                    &action_key,
+                                    action_time,
+                                );
+                            }
+                            Ok(false) => {
+                                out.push(build_response_event(
+                                    action_time,
+                                    "response_execution_failed",
+                                    json!({
+                                        "action": "process_kill",
+                                        "target_type": "process",
+                                        "response_mode": response_mode(policy),
+                                        "outcome": "failed",
+                                        "original_event_type": event.event_type,
+                                        "incident_key": incident_key_value,
+                                        "action_key": action_key,
+                                        "pid": target.pid,
+                                        "score": score,
+                                        "confidence": confidence,
+                                        "process_kind": target.process_kind,
+                                        "associated_path": target.associated_path,
+                                        "chain_root_pid": target.chain_root_pid,
+                                        "is_root_process": target.is_root_process,
+                                        "selection_reason": target.selection_reason,
+                                        "reason": "kill command completed but did not report success"
+                                    }),
+                                ));
+                            }
+                            Err(err) => {
+                                out.push(build_response_event(
+                                    action_time,
+                                    "response_execution_failed",
+                                    json!({
+                                        "action": "process_kill",
+                                        "target_type": "process",
+                                        "response_mode": response_mode(policy),
+                                        "outcome": "failed",
+                                        "original_event_type": event.event_type,
+                                        "incident_key": incident_key_value,
+                                        "action_key": action_key,
+                                        "pid": target.pid,
+                                        "score": score,
+                                        "confidence": confidence,
+                                        "process_kind": target.process_kind,
+                                        "associated_path": target.associated_path,
+                                        "chain_root_pid": target.chain_root_pid,
+                                        "is_root_process": target.is_root_process,
+                                        "selection_reason": target.selection_reason,
+                                        "reason": format!("process kill failed: {}", err)
+                                    }),
+                                ));
+                            }
+                        }
                     }
                 }
                 Err(reason) => {
                     out.push(build_response_event(
+                        action_time,
                         "response_blocked_by_guardrail",
                         json!({
                             "action": "process_kill",
+                            "target_type": "process",
+                            "response_mode": response_mode(policy),
+                            "outcome": "blocked",
                             "original_event_type": event.event_type,
                             "incident_key": incident_key_value,
                             "action_key": action_key,
@@ -142,18 +213,23 @@ pub fn handle_detection(
 
     if policy.enable_file_quarantine && score >= policy.quarantine_threshold {
         for target in quarantine_targets {
+            let action_time = Utc::now();
             let action_key = response_action_key("file_quarantine", &target.path);
 
             if !agent_state.should_allow_response_action(
                 &incident_key_value,
                 &action_key,
-                Utc::now(),
+                action_time,
                 RESPONSE_ACTION_COOLDOWN_SECONDS,
             ) {
                 out.push(build_response_event(
+                    action_time,
                     "response_suppressed_by_cooldown",
                     json!({
                         "action": "file_quarantine",
+                        "target_type": "file",
+                        "response_mode": response_mode(policy),
+                        "outcome": "suppressed",
                         "original_event_type": event.event_type,
                         "incident_key": incident_key_value,
                         "action_key": action_key,
@@ -180,8 +256,13 @@ pub fn handle_detection(
                 Ok(()) => {
                     if policy.simulation_mode {
                         out.push(build_response_event(
+                            action_time,
                             "response_simulated_file_quarantine",
                             json!({
+                                "action": "file_quarantine",
+                                "target_type": "file",
+                                "response_mode": response_mode(policy),
+                                "outcome": "simulated",
                                 "original_event_type": event.event_type,
                                 "incident_key": incident_key_value,
                                 "action_key": action_key,
@@ -196,35 +277,90 @@ pub fn handle_detection(
                         agent_state.record_response_action(
                             &incident_key_value,
                             &action_key,
-                            Utc::now(),
+                            action_time,
                         );
-                    } else if let Some(new_path) = quarantine_file(&target.path)? {
-                        out.push(build_response_event(
-                            "response_file_quarantined",
-                            json!({
-                                "original_event_type": event.event_type,
-                                "incident_key": incident_key_value,
-                                "action_key": action_key,
-                                "old_path": target.path,
-                                "new_path": new_path,
-                                "path_kind": classified_path_kind,
-                                "score": score,
-                                "confidence": confidence,
-                                "selection_reason": target.selection_reason
-                            }),
-                        ));
-                        agent_state.record_response_action(
-                            &incident_key_value,
-                            &action_key,
-                            Utc::now(),
-                        );
+                    } else {
+                        match quarantine_file(&target.path) {
+                            Ok(Some(new_path)) => {
+                                out.push(build_response_event(
+                                    action_time,
+                                    "response_file_quarantined",
+                                    json!({
+                                        "action": "file_quarantine",
+                                        "target_type": "file",
+                                        "response_mode": response_mode(policy),
+                                        "outcome": "executed",
+                                        "original_event_type": event.event_type,
+                                        "incident_key": incident_key_value,
+                                        "action_key": action_key,
+                                        "old_path": target.path,
+                                        "new_path": new_path,
+                                        "path_kind": classified_path_kind,
+                                        "score": score,
+                                        "confidence": confidence,
+                                        "selection_reason": target.selection_reason
+                                    }),
+                                ));
+                                agent_state.record_response_action(
+                                    &incident_key_value,
+                                    &action_key,
+                                    action_time,
+                                );
+                            }
+                            Ok(None) => {
+                                out.push(build_response_event(
+                                    action_time,
+                                    "response_noop_target_missing",
+                                    json!({
+                                        "action": "file_quarantine",
+                                        "target_type": "file",
+                                        "response_mode": response_mode(policy),
+                                        "outcome": "noop",
+                                        "original_event_type": event.event_type,
+                                        "incident_key": incident_key_value,
+                                        "action_key": action_key,
+                                        "path": target.path,
+                                        "path_kind": classified_path_kind,
+                                        "score": score,
+                                        "confidence": confidence,
+                                        "selection_reason": target.selection_reason,
+                                        "reason": "Target file was no longer present when quarantine was attempted"
+                                    }),
+                                ));
+                            }
+                            Err(err) => {
+                                out.push(build_response_event(
+                                    action_time,
+                                    "response_execution_failed",
+                                    json!({
+                                        "action": "file_quarantine",
+                                        "target_type": "file",
+                                        "response_mode": response_mode(policy),
+                                        "outcome": "failed",
+                                        "original_event_type": event.event_type,
+                                        "incident_key": incident_key_value,
+                                        "action_key": action_key,
+                                        "path": target.path,
+                                        "path_kind": classified_path_kind,
+                                        "score": score,
+                                        "confidence": confidence,
+                                        "selection_reason": target.selection_reason,
+                                        "reason": format!("file quarantine failed: {}", err)
+                                    }),
+                                ));
+                            }
+                        }
                     }
                 }
                 Err(reason) => {
                     out.push(build_response_event(
+                        action_time,
                         "response_blocked_by_guardrail",
                         json!({
                             "action": "file_quarantine",
+                            "target_type": "file",
+                            "response_mode": response_mode(policy),
+                            "outcome": "blocked",
                             "original_event_type": event.event_type,
                             "incident_key": incident_key_value,
                             "action_key": action_key,
@@ -260,8 +396,16 @@ struct FileQuarantineTarget {
     selection_reason: String,
 }
 
-fn build_response_event(event_type: &str, payload: Value) -> TelemetryEvent {
-    TelemetryEvent::new(Utc::now(), event_type, "core-agent/response", payload)
+fn build_response_event(timestamp: chrono::DateTime<Utc>, event_type: &str, payload: Value) -> TelemetryEvent {
+    TelemetryEvent::new(timestamp, event_type, "core-agent/response", payload)
+}
+
+fn response_mode(policy: &ResponsePolicy) -> &'static str {
+    if policy.simulation_mode {
+        "simulation"
+    } else {
+        "enforcement"
+    }
 }
 
 fn alert_score(event: &TelemetryEvent) -> u8 {
