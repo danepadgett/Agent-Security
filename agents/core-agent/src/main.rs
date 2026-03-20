@@ -25,7 +25,7 @@ use execution_graph::ExecutionGraphCache;
 use files::{collect_file_events, scan_directories, tracked_directories};
 use incidents::aggregate_incidents;
 use lineage::ProcessLineageCache;
-use logging::append_event;
+use logging::{append_event, append_response_audit};
 use models::{FileEventRecord, TelemetryEvent};
 use provenance::ArtifactProvenanceCache;
 use response::handle_detection;
@@ -112,28 +112,29 @@ fn main() -> Result<()> {
             append_event(&event.telemetry_event)?;
         }
 
-        let current_processes = process_events
+        let recent_processes = process_events
             .iter()
             .map(|event| event.process.clone())
             .collect::<Vec<_>>();
 
-        let all_known_processes = known_processes.values().cloned().collect::<Vec<_>>();
+        let current_processes = known_processes.values().cloned().collect::<Vec<_>>();
         let current_file_window = recent_file_events.iter().cloned().collect::<Vec<_>>();
 
-        execution_graph.ingest_processes(&current_processes, &current_file_window, now);
-        lineage_cache.ingest_processes(&all_known_processes, now);
+        execution_graph.ingest_processes(&recent_processes, &current_file_window, now);
+        lineage_cache.ingest_processes(&current_processes, now);
         provenance_cache.ingest_file_events(&current_file_window, now);
-        provenance_cache.ingest_processes(&current_processes, now);
-        baseline_profile.ingest_processes(&all_known_processes, now);
+        provenance_cache.ingest_processes(&recent_processes, now);
+        baseline_profile.ingest_processes(&current_processes, now);
 
         if startup_completed {
             let detection_context = DetectionContext {
-                recent_file_events: current_file_window,
-                recent_processes: current_processes,
-                execution_graph: execution_graph.snapshot(),
+                recent_file_events: current_file_window.clone(),
+                recent_processes: recent_processes.clone(),
+                current_processes: current_processes.clone(),
                 lineage: lineage_cache.snapshot(),
                 provenance: provenance_cache.snapshot(),
                 baseline: baseline_profile.snapshot(),
+                execution_graph: execution_graph.snapshot(),
                 now,
             };
 
@@ -168,6 +169,7 @@ fn main() -> Result<()> {
                     for response_event in response_events {
                         println!("RESPONSE: {}", response_event.event_type);
                         append_event(&response_event)?;
+                        append_response_audit(&response_event)?;
                     }
                 } else {
                     println!(

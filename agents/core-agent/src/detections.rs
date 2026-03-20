@@ -9,13 +9,19 @@ use chrono::{DateTime, Duration, Utc};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::Path;
+use crate::baseline::BaselineSnapshot;
+use crate::provenance::ArtifactProvenanceSnapshot;
 
 pub struct DetectionContext {
     pub recent_file_events: Vec<FileEventRecord>,
+    pub current_processes: Vec<ProcessInfo>,
     pub recent_processes: Vec<ProcessInfo>,
     pub execution_graph: ExecutionGraphSnapshot,
     pub lineage: LineageSnapshot,
+    pub provenance: ArtifactProvenanceSnapshot,
+    pub baseline: BaselineSnapshot,
     pub now: DateTime<Utc>,
+
 }
 
 pub fn evaluate_detections(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
