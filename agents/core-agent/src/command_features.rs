@@ -26,6 +26,9 @@ pub fn extract_features(command: &str, args: &str) -> ProcessBehaviorFeatures {
         referenced_paths.insert(normalize_path_token(command));
     }
 
+    let referenced_urls = collect_referenced_urls(command, args);
+    let references_url = !referenced_urls.is_empty();
+
     let references_downloads_path = referenced_paths.iter().any(|path| path.contains("/Downloads/"));
     let references_persistence_path = referenced_paths
         .iter()
@@ -35,6 +38,8 @@ pub fn extract_features(command: &str, args: &str) -> ProcessBehaviorFeatures {
     let references_executable_candidate = referenced_paths
         .iter()
         .any(|path| is_executable_candidate_path(path));
+
+    let downloader_family = downloader_family(&command_name, &full_lower);
 
     let mut suspicious_command_patterns = Vec::new();
 
@@ -60,11 +65,15 @@ pub fn extract_features(command: &str, args: &str) -> ProcessBehaviorFeatures {
     }
 
     if command_name == "launchctl"
-        && ["load", "bootstrap", "enable", "kickstart"]
+        && ["load", "bootstrap", "enable", "kickstart", "bootout"]
             .iter()
             .any(|token| full_lower.contains(token))
     {
         suspicious_command_patterns.push("launchctl_persistence_operation".to_string());
+    }
+
+    if command_name == "crontab" {
+        suspicious_command_patterns.push("crontab_persistence_operation".to_string());
     }
 
     if command_name == "open" && references_executable_candidate {
@@ -95,8 +104,20 @@ pub fn extract_features(command: &str, args: &str) -> ProcessBehaviorFeatures {
         suspicious_command_patterns.push("persistence_path_reference".to_string());
     }
 
+    if references_url && uses_network_download_tool {
+        suspicious_command_patterns.push("network_download_with_url".to_string());
+    }
+
+    if references_url && references_executable_candidate {
+        suspicious_command_patterns.push("url_referenced_with_executable_candidate".to_string());
+    }
+
     suspicious_command_patterns.sort();
     suspicious_command_patterns.dedup();
+
+    let network_indicator_count = usize::from(references_url)
+        + usize::from(uses_network_download_tool)
+        + referenced_urls.len();
 
     ProcessBehaviorFeatures {
         has_pipe,
@@ -107,9 +128,13 @@ pub fn extract_features(command: &str, args: &str) -> ProcessBehaviorFeatures {
         references_persistence_path,
         references_script_file,
         references_executable_candidate,
+        references_url,
+        downloader_family,
         suspicious_command_patterns,
         referenced_paths: referenced_paths.into_iter().collect(),
+        referenced_urls,
         token_count: tokenize(&full).len(),
+        network_indicator_count,
     }
 }
 
@@ -136,6 +161,43 @@ fn collect_referenced_paths(command: &str, args: &str) -> BTreeSet<String> {
     paths
 }
 
+fn collect_referenced_urls(command: &str, args: &str) -> Vec<String> {
+    let mut urls = BTreeSet::new();
+
+    for token in tokenize(command).into_iter().chain(tokenize(args)) {
+        let normalized = token
+            .trim_matches(|c| c == '"' || c == '\'' || c == '`' || c == ',' || c == ';')
+            .to_string();
+
+        if looks_like_url(&normalized) {
+            urls.insert(normalized);
+        }
+    }
+
+    urls.into_iter().collect()
+}
+
+fn looks_like_url(token: &str) -> bool {
+    let lower = token.to_ascii_lowercase();
+    lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("ftp://")
+}
+
+fn downloader_family(command_name: &str, full_lower: &str) -> Option<String> {
+    if matches!(command_name, "curl" | "wget") {
+        Some(command_name.to_string())
+    } else if command_name == "python" || command_name == "python3" {
+        if full_lower.contains("urllib") || full_lower.contains("requests") {
+            Some("python_network".to_string())
+        } else {
+            None
+        }
+    } else if command_name == "osascript" && full_lower.contains("http") {
+        Some("osascript_network".to_string())
+    } else {
+        None
+    }
+}
+
 fn tokenize(input: &str) -> Vec<String> {
     input
         .split_whitespace()
@@ -154,6 +216,8 @@ fn token_looks_like_path(token: &str) -> bool {
         || token.contains("/Documents/")
         || token.contains("/Library/LaunchAgents/")
         || token.contains("/Library/LaunchDaemons/")
+        || token.contains("/private/etc/")
+        || token.contains("/usr/lib/cron/tabs/")
         || token.contains(".app")
         || token.contains(".pkg")
         || token.contains(".dmg")

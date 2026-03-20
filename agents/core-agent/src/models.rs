@@ -165,9 +165,13 @@ pub struct ProcessBehaviorFeatures {
     pub references_persistence_path: bool,
     pub references_script_file: bool,
     pub references_executable_candidate: bool,
+    pub references_url: bool,
+    pub downloader_family: Option<String>,
     pub suspicious_command_patterns: Vec<String>,
     pub referenced_paths: Vec<String>,
+    pub referenced_urls: Vec<String>,
     pub token_count: usize,
+    pub network_indicator_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

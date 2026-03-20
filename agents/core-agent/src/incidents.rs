@@ -124,7 +124,14 @@ fn build_incident(acc: IncidentAccumulator, now: DateTime<Utc>) -> Option<Teleme
     let has_follow_on_binary = acc
         .signal_set
         .contains("alert_interpreter_spawned_follow_on_binary");
+    let has_downloader_url_execution = acc
+        .signal_set
+        .contains("alert_downloader_url_execution");
+    let has_browser_ancestor_downloader_chain = acc
+        .signal_set
+        .contains("alert_browser_ancestor_downloader_chain");
     let has_persistence = acc.signal_set.contains("alert_persistence_artifact_touched");
+    let has_persistence_tooling = acc.signal_set.contains("alert_persistence_tooling_activity");
     let has_suspicious_persistence_chain = acc
         .signal_set
         .contains("alert_suspicious_persistence_chain");
@@ -141,7 +148,10 @@ fn build_incident(acc: IncidentAccumulator, now: DateTime<Utc>) -> Option<Teleme
         has_command_pattern,
         has_interpreter_abuse,
         has_follow_on_binary,
+        has_downloader_url_execution,
+        has_browser_ancestor_downloader_chain,
         has_persistence,
+        has_persistence_tooling,
         has_suspicious_persistence_chain,
         has_downloaded_installer,
         signal_count,
@@ -198,7 +208,10 @@ fn score_incident(
     has_command_pattern: bool,
     has_interpreter_abuse: bool,
     has_follow_on_binary: bool,
+    has_downloader_url_execution: bool,
+    has_browser_ancestor_downloader_chain: bool,
     has_persistence: bool,
+    has_persistence_tooling: bool,
     has_suspicious_persistence_chain: bool,
     has_downloaded_installer: bool,
     signal_count: usize,
@@ -251,7 +264,7 @@ fn score_incident(
             name: "interpreter_abuse".to_string(),
             points: 16,
             reason:
-                "Interpreter usage showed inline execution, script staging, or persistence references"
+                "Interpreter usage showed inline execution, script staging, persistence, or URL context"
                     .to_string(),
         });
     }
@@ -264,12 +277,35 @@ fn score_incident(
         });
     }
 
+    if has_downloader_url_execution {
+        components.push(IncidentScoreComponent {
+            name: "downloader_url_execution".to_string(),
+            points: 18,
+            reason: "Downloader-like execution referenced one or more URLs".to_string(),
+        });
+    }
+
+    if has_browser_ancestor_downloader_chain {
+        components.push(IncidentScoreComponent {
+            name: "browser_ancestor_downloader_chain".to_string(),
+            points: 14,
+            reason: "Downloader-like execution originated from a browser ancestry chain".to_string(),
+        });
+    }
+
     if has_persistence {
         components.push(IncidentScoreComponent {
             name: "persistence_artifact_touch".to_string(),
             points: 15,
-            reason: "A LaunchAgent or other persistence-related file was created or modified"
-                .to_string(),
+            reason: "A LaunchAgent, LaunchDaemon, or cron-style artifact was modified".to_string(),
+        });
+    }
+
+    if has_persistence_tooling {
+        components.push(IncidentScoreComponent {
+            name: "persistence_tooling_activity".to_string(),
+            points: 18,
+            reason: "Persistence-oriented system tooling activity was observed".to_string(),
         });
     }
 
@@ -425,16 +461,21 @@ fn classify_attack_chain_label(timeline: &[IncidentTimelineStep]) -> String {
     let has_download_exec = event_types.contains(&"alert_downloaded_file_executed");
     let has_interpreter = event_types.contains(&"alert_interpreter_launch_from_downloads")
         || event_types.contains(&"alert_interpreter_abuse");
+    let has_downloader = event_types.contains(&"alert_downloader_url_execution")
+        || event_types.contains(&"alert_browser_ancestor_downloader_chain");
     let has_follow_on = event_types.contains(&"alert_suspicious_shell_chain")
         || event_types.contains(&"alert_interpreter_spawned_follow_on_binary");
     let has_persistence = event_types.contains(&"alert_persistence_artifact_touched")
-        || event_types.contains(&"alert_suspicious_persistence_chain");
+        || event_types.contains(&"alert_suspicious_persistence_chain")
+        || event_types.contains(&"alert_persistence_tooling_activity");
     let has_installer = event_types.contains(&"alert_downloaded_installer_activity");
 
     if has_download_exec && has_persistence {
         "download_to_persistence".to_string()
     } else if has_installer && has_persistence {
         "installer_to_persistence".to_string()
+    } else if has_downloader && has_download_exec {
+        "url_to_download_execution".to_string()
     } else if has_download_exec && has_interpreter && has_follow_on {
         "download_to_interpreter_to_child".to_string()
     } else if has_interpreter && has_persistence {
@@ -514,6 +555,10 @@ fn to_timeline_step(event: &TelemetryEvent) -> IncidentTimelineStep {
                 format_path_suffix(path.as_deref())
             ),
         ),
+        "alert_persistence_tooling_activity" => (
+            "persistence tooling executed".to_string(),
+            "Persistence-oriented system tooling activity was observed".to_string(),
+        ),
         "alert_suspicious_shell_chain" => (
             "shell chain spawned child".to_string(),
             "A shell or script execution spawned a follow-on child process".to_string(),
@@ -529,6 +574,14 @@ fn to_timeline_step(event: &TelemetryEvent) -> IncidentTimelineStep {
         "alert_interpreter_spawned_follow_on_binary" => (
             "interpreter spawned follow-on binary".to_string(),
             "A suspicious interpreter process spawned a second-stage child process".to_string(),
+        ),
+        "alert_downloader_url_execution" => (
+            "downloader referenced url".to_string(),
+            "Downloader-like execution referenced one or more URLs".to_string(),
+        ),
+        "alert_browser_ancestor_downloader_chain" => (
+            "browser-origin download chain".to_string(),
+            "A browser ancestry chain led into downloader-like execution".to_string(),
         ),
         "alert_suspicious_persistence_chain" => (
             "suspicious chain touched persistence".to_string(),
@@ -575,6 +628,8 @@ fn timeline_priority(event_type: &str) -> u8 {
     match event_type {
         "alert_quarantined_file_activity" => 10,
         "alert_file_became_executable" => 20,
+        "alert_downloader_url_execution" => 25,
+        "alert_browser_ancestor_downloader_chain" => 28,
         "alert_downloaded_file_executed" => 30,
         "alert_interpreter_launch_from_downloads" => 40,
         "alert_command_pattern_abuse" => 50,
@@ -582,6 +637,7 @@ fn timeline_priority(event_type: &str) -> u8 {
         "alert_suspicious_shell_chain" => 70,
         "alert_interpreter_spawned_follow_on_binary" => 80,
         "alert_downloaded_installer_activity" => 85,
+        "alert_persistence_tooling_activity" => 88,
         "alert_persistence_artifact_touched" => 90,
         "alert_suspicious_persistence_chain" => 95,
         _ => 100,

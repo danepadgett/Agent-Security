@@ -1,3 +1,4 @@
+mod baseline;
 mod classify;
 mod command_features;
 mod config;
@@ -6,24 +7,31 @@ mod execution_graph;
 mod files;
 mod guardrails;
 mod incidents;
+mod lineage;
 mod logging;
 mod models;
 mod processes;
+mod provenance;
+mod replay;
 mod response;
 mod state;
 
 use anyhow::Result;
+use baseline::BaselineProfile;
 use chrono::Utc;
 use config::load_policy;
 use detections::{evaluate_detections, DetectionContext};
 use execution_graph::ExecutionGraphCache;
 use files::{collect_file_events, scan_directories, tracked_directories};
 use incidents::aggregate_incidents;
+use lineage::ProcessLineageCache;
 use logging::append_event;
 use models::{FileEventRecord, TelemetryEvent};
+use provenance::ArtifactProvenanceCache;
 use response::handle_detection;
 use state::{normalize_state_summary, AgentState};
 use std::collections::{HashMap, VecDeque};
+use std::env;
 use std::thread;
 use std::time::Duration;
 
@@ -31,8 +39,15 @@ const ALERT_EMIT_COOLDOWN_SECONDS: i64 = 60;
 const INCIDENT_EMIT_COOLDOWN_SECONDS: i64 = 120;
 const INCIDENT_STATE_TTL_SECONDS: i64 = 3600;
 const RESPONSE_STATE_TTL_SECONDS: i64 = 3600;
+const LINEAGE_STATE_TTL_SECONDS: i64 = 1800;
+const PROVENANCE_STATE_TTL_SECONDS: i64 = 3600;
+const BASELINE_STATE_TTL_SECONDS: i64 = 7200;
 
 fn main() -> Result<()> {
+    if let Ok(replay_path) = env::var("CORE_AGENT_REPLAY_JSONL") {
+        return replay::run_replay(&replay_path);
+    }
+
     println!("Core Agent Starting...");
 
     let policy = load_policy()?;
@@ -56,6 +71,9 @@ fn main() -> Result<()> {
     let mut recent_file_events: VecDeque<FileEventRecord> = VecDeque::new();
     let mut alert_last_seen: HashMap<String, chrono::DateTime<Utc>> = HashMap::new();
     let mut execution_graph = ExecutionGraphCache::new(300);
+    let mut lineage_cache = ProcessLineageCache::new(LINEAGE_STATE_TTL_SECONDS);
+    let mut provenance_cache = ArtifactProvenanceCache::new(PROVENANCE_STATE_TTL_SECONDS);
+    let mut baseline_profile = BaselineProfile::new(BASELINE_STATE_TTL_SECONDS);
     let mut agent_state = AgentState::new();
     let mut startup_completed = false;
     let mut loop_counter: u64 = 0;
@@ -99,14 +117,23 @@ fn main() -> Result<()> {
             .map(|event| event.process.clone())
             .collect::<Vec<_>>();
 
+        let all_known_processes = known_processes.values().cloned().collect::<Vec<_>>();
         let current_file_window = recent_file_events.iter().cloned().collect::<Vec<_>>();
+
         execution_graph.ingest_processes(&current_processes, &current_file_window, now);
+        lineage_cache.ingest_processes(&all_known_processes, now);
+        provenance_cache.ingest_file_events(&current_file_window, now);
+        provenance_cache.ingest_processes(&current_processes, now);
+        baseline_profile.ingest_processes(&all_known_processes, now);
 
         if startup_completed {
             let detection_context = DetectionContext {
                 recent_file_events: current_file_window,
                 recent_processes: current_processes,
                 execution_graph: execution_graph.snapshot(),
+                lineage: lineage_cache.snapshot(),
+                provenance: provenance_cache.snapshot(),
+                baseline: baseline_profile.snapshot(),
                 now,
             };
 
@@ -124,8 +151,8 @@ fn main() -> Result<()> {
 
             let incident_events = aggregate_incidents(&detection_events, now);
             for incident in incident_events {
-                let (should_emit_incident, record) = agent_state
-                    .should_emit_incident(&incident, INCIDENT_EMIT_COOLDOWN_SECONDS);
+                let (should_emit_incident, record) =
+                    agent_state.should_emit_incident(&incident, INCIDENT_EMIT_COOLDOWN_SECONDS);
 
                 if should_emit_incident {
                     println!(
@@ -162,7 +189,9 @@ fn main() -> Result<()> {
                     "core-agent/state",
                     serde_json::json!({
                         "state_summary": state_summary,
-                        "normalized_summary": normalized
+                        "normalized_summary": normalized,
+                        "provenance_summary": provenance_cache.summary_json(),
+                        "baseline_summary": baseline_profile.summary_json()
                     }),
                 );
                 append_event(&summary_event)?;

@@ -1,35 +1,5 @@
 use std::path::Path;
 
-pub fn classify_process_command(command: &str) -> String {
-    let lower = command.to_ascii_lowercase();
-
-    if is_script_interpreter(command) {
-        return "interpreter".to_string();
-    }
-
-    if is_browser_process(command) {
-        return "browser".to_string();
-    }
-
-    if lower.starts_with("/system/")
-        || lower.starts_with("/usr/")
-        || lower.starts_with("/bin/")
-        || lower.starts_with("/sbin/")
-        || lower.starts_with("/library/apple/")
-    {
-        return "system".to_string();
-    }
-
-    if lower.starts_with("/applications/")
-        || lower.contains("/applications/")
-        || lower.starts_with("/users/")
-    {
-        return "user_app".to_string();
-    }
-
-    "unknown".to_string()
-}
-
 pub fn classify_path(path: &str) -> String {
     let lower = path.to_ascii_lowercase();
 
@@ -41,20 +11,77 @@ pub fn classify_path(path: &str) -> String {
         return "downloads".to_string();
     }
 
+    if lower.contains("/desktop/") {
+        return "desktop".to_string();
+    }
+
+    if lower.contains("/documents/") {
+        return "documents".to_string();
+    }
+
     if lower.starts_with("/system/")
         || lower.starts_with("/usr/")
         || lower.starts_with("/bin/")
         || lower.starts_with("/sbin/")
-        || lower.starts_with("/library/")
+        || lower.starts_with("/private/var/db/")
+        || lower.starts_with("/library/apple/")
     {
-        return "system_space".to_string();
+        return "system".to_string();
     }
 
-    if lower.starts_with("/users/") {
-        return "user_space".to_string();
+    if lower.contains("/applications/")
+        || lower.ends_with(".app")
+        || lower.contains(".app/")
+    {
+        return "user_app".to_string();
     }
 
     "unknown".to_string()
+}
+
+pub fn classify_process_command(command: &str) -> String {
+    let lower = basename(command);
+
+    if is_browser_command(command) {
+        return "browser".to_string();
+    }
+
+    if is_script_interpreter(command) || is_network_tool(command) || is_persistence_tool_command(command)
+    {
+        return "interpreter".to_string();
+    }
+
+    if command.starts_with("/System/")
+        || command.starts_with("/usr/")
+        || command.starts_with("/bin/")
+        || command.starts_with("/sbin/")
+    {
+        return "system".to_string();
+    }
+
+    if command.contains("/Applications/") || lower.ends_with(".app") {
+        return "user_app".to_string();
+    }
+
+    "unknown".to_string()
+}
+
+pub fn is_script_interpreter(command: &str) -> bool {
+    matches!(
+        basename(command).as_str(),
+        "bash" | "sh" | "zsh" | "python" | "python3" | "osascript" | "perl" | "ruby" | "node"
+    )
+}
+
+pub fn is_network_tool(command: &str) -> bool {
+    matches!(basename(command).as_str(), "curl" | "wget")
+}
+
+pub fn is_persistence_tool_command(command: &str) -> bool {
+    matches!(
+        basename(command).as_str(),
+        "launchctl" | "crontab" | "osascript" | "defaults"
+    )
 }
 
 pub fn is_persistence_path(path: &str) -> bool {
@@ -62,29 +89,75 @@ pub fn is_persistence_path(path: &str) -> bool {
 
     lower.contains("/library/launchagents/")
         || lower.contains("/library/launchdaemons/")
-        || (lower.ends_with(".plist") && lower.contains("launchagents"))
-        || (lower.ends_with(".plist") && lower.contains("launchdaemons"))
+        || lower == "/etc/crontab"
+        || lower == "/private/etc/crontab"
+        || lower.starts_with("/usr/lib/cron/tabs/")
+        || lower.starts_with("/private/var/at/tabs/")
+        || lower.contains("/library/preferences/com.apple.loginwindow.plist")
+        || lower.ends_with(".plist")
+            && (lower.contains("/launchagents/")
+                || lower.contains("/launchdaemons/")
+                || lower.contains("loginwindow"))
 }
 
-pub fn is_script_interpreter(command: &str) -> bool {
-    let filename = Path::new(command)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(command)
-        .to_ascii_lowercase();
-
+pub fn is_browser_command(command: &str) -> bool {
     matches!(
-        filename.as_str(),
-        "sh" | "bash" | "zsh" | "python" | "python3" | "osascript"
+        basename(command).as_str(),
+        "safari"
+            | "google chrome"
+            | "chrome"
+            | "firefox"
+            | "arc"
+            | "brave browser"
+            | "brave"
+            | "microsoft edge"
+            | "edge"
     )
 }
 
-fn is_browser_process(command: &str) -> bool {
-    let lower = command.to_ascii_lowercase();
+pub fn is_benign_developer_tool_command(command: &str, args: &str) -> bool {
+    let name = basename(command);
+    let args_lower = args.to_ascii_lowercase();
 
-    lower.contains("safari")
-        || lower.contains("chrome")
-        || lower.contains("firefox")
-        || lower.contains("brave")
-        || lower.contains("arc")
+    match name.as_str() {
+        "cargo" | "rustc" | "rust-analyzer" | "sccache" | "brew" | "git" | "make" | "cmake"
+        | "xcodebuild" | "swift" | "swiftc" | "pod" | "gem" | "bundle" | "poetry" | "uv"
+        | "bun" | "npm" | "npx" | "yarn" => true,
+        "python" | "python3" => {
+            args_lower.starts_with("-m pip")
+                || args_lower.starts_with("-m venv")
+                || args_lower.contains("site-packages")
+        }
+        "pip" | "pip3" => true,
+        "node" => {
+            args_lower.contains("node_modules")
+                || args_lower.contains("npm")
+                || args_lower.contains("vite")
+                || args_lower.contains("next")
+        }
+        _ => false,
+    }
+}
+
+pub fn is_benign_admin_tool_command(command: &str, args: &str) -> bool {
+    let name = basename(command);
+    let args_lower = args.to_ascii_lowercase();
+
+    match name.as_str() {
+        "softwareupdate" | "installer" => true,
+        "defaults" => {
+            args_lower.contains("com.apple")
+                && !args_lower.contains("loginwindow")
+                && !args_lower.contains("login item")
+        }
+        _ => false,
+    }
+}
+
+fn basename(path: &str) -> String {
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(path)
+        .to_ascii_lowercase()
 }
