@@ -3,6 +3,7 @@ mod classify;
 mod command_features;
 mod config;
 mod detections;
+mod evidence;
 mod execution_graph;
 mod files;
 mod guardrails;
@@ -21,6 +22,7 @@ use baseline::BaselineProfile;
 use chrono::Utc;
 use config::load_policy;
 use detections::{evaluate_detections, DetectionContext};
+use evidence::write_incident_evidence_pack;
 use execution_graph::ExecutionGraphCache;
 use files::{collect_file_events, scan_directories, tracked_directories};
 use incidents::aggregate_incidents;
@@ -166,10 +168,46 @@ fn main() -> Result<()> {
                     append_event(&incident)?;
 
                     let response_events = handle_detection(&incident, &policy, &mut agent_state)?;
-                    for response_event in response_events {
+                    for response_event in &response_events {
                         println!("RESPONSE: {}", response_event.event_type);
-                        append_event(&response_event)?;
-                        append_response_audit(&response_event)?;
+                        append_event(response_event)?;
+                        append_response_audit(response_event)?;
+                    }
+
+                    match write_incident_evidence_pack(&incident, &response_events) {
+                        Ok(pack_path) => {
+                            let evidence_event = TelemetryEvent::response(
+                                now,
+                                "response_evidence_pack_created",
+                                serde_json::json!({
+                                    "action": "evidence_pack_write",
+                                    "target_type": "incident",
+                                    "response_mode": "system",
+                                    "outcome": "executed",
+                                    "incident_key": record.incident_key,
+                                    "path": pack_path,
+                                    "reason": "Structured incident evidence pack written to disk"
+                                }),
+                            );
+                            append_event(&evidence_event)?;
+                            append_response_audit(&evidence_event)?;
+                        }
+                        Err(err) => {
+                            let evidence_error_event = TelemetryEvent::response(
+                                now,
+                                "response_evidence_pack_failed",
+                                serde_json::json!({
+                                    "action": "evidence_pack_write",
+                                    "target_type": "incident",
+                                    "response_mode": "system",
+                                    "outcome": "failed",
+                                    "incident_key": record.incident_key,
+                                    "reason": format!("Failed to write incident evidence pack: {}", err)
+                                }),
+                            );
+                            append_event(&evidence_error_event)?;
+                            append_response_audit(&evidence_error_event)?;
+                        }
                     }
                 } else {
                     println!(
@@ -185,10 +223,9 @@ fn main() -> Result<()> {
                 let state_summary = agent_state.snapshot_summary();
                 let normalized = normalize_state_summary(&state_summary);
 
-                let summary_event = TelemetryEvent::new(
+                let summary_event = TelemetryEvent::state(
                     now,
                     "agent_state_snapshot",
-                    "core-agent/state",
                     serde_json::json!({
                         "state_summary": state_summary,
                         "normalized_summary": normalized,

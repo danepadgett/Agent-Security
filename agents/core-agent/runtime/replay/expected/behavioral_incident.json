@@ -1,0 +1,8 @@
+{
+  "min_total_events": 1,
+  "min_total_alerts": 1,
+  "min_total_incidents": 1,
+  "required_alert_types": {
+    "alert_behavioral_incident": 1
+  }
+}

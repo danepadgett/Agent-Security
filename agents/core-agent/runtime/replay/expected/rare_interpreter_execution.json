@@ -1,0 +1,7 @@
+{
+  "min_total_events": 1,
+  "min_total_alerts": 1,
+  "required_alert_types": {
+    "alert_rare_interpreter_execution": 1
+  }
+}

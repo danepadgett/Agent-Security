@@ -31,7 +31,7 @@ pub fn evaluate_detections(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
         detections.push(event);
     }
 
-    detections.extend(detect_downloaded_file_execution(ctx));
+    detections.extend(detect_downloaded_file_executed(ctx));
     detections.extend(detect_interpreter_launch_from_downloads(ctx));
     detections.extend(detect_file_became_executable(ctx));
     detections.extend(detect_quarantined_file_activity(ctx));
@@ -293,7 +293,7 @@ fn detect_burst_file_activity(ctx: &DetectionContext) -> Option<TelemetryEvent> 
     ))
 }
 
-fn detect_downloaded_file_execution(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
+fn detect_downloaded_file_executed(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
     let cutoff = ctx.now - Duration::seconds(120);
 
     let recent_download_paths: Vec<String> = ctx
@@ -314,7 +314,7 @@ fn detect_downloaded_file_execution(ctx: &DetectionContext) -> Vec<TelemetryEven
         let process_text = format!("{} {}", process.command, process.args);
 
         for download_path in &recent_download_paths {
-            if process_text.contains(download_path) || process.command == *download_path {
+            if process_matches_download_path(process, &process_text, download_path) {
                 let mut details = json!({
                     "pid": process.pid,
                     "ppid": process.ppid,
@@ -369,7 +369,7 @@ fn detect_interpreter_launch_from_downloads(ctx: &DetectionContext) -> Vec<Telem
         let process_text = format!("{} {}", process.command, process.args);
 
         for download_path in &recent_download_paths {
-            if process_text.contains(download_path) {
+            if process_matches_download_path(process, &process_text, download_path) {
                 let mut details = json!({
                     "pid": process.pid,
                     "ppid": process.ppid,
@@ -522,7 +522,7 @@ fn detect_suspicious_shell_chain(ctx: &DetectionContext) -> Vec<TelemetryEvent> 
         let process_text = format!("{} {}", process.command, process.args);
 
         for download_path in &recent_download_paths {
-            if process_text.contains(download_path) {
+            if process_matches_download_path(process, &process_text, download_path) {
                 interpreter_parents.insert(process.pid, (process, download_path.clone()));
                 break;
             }
@@ -1208,6 +1208,27 @@ fn is_boring_shell_child(command: &str) -> bool {
         .to_ascii_lowercase();
 
     matches!(filename.as_str(), "ps")
+}
+
+fn process_matches_download_path(
+    process: &ProcessInfo,
+    process_text: &str,
+    download_path: &str,
+) -> bool {
+    if process_text.contains(download_path) || process.command == download_path {
+        return true;
+    }
+
+    let basename = Path::new(download_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(download_path)
+        .to_ascii_lowercase();
+
+    let args_lower = process.args.to_ascii_lowercase();
+    let command_lower = process.command.to_ascii_lowercase();
+
+    args_lower.contains(&basename) || command_lower == basename
 }
 
 fn file_extension(path: &str) -> String {
