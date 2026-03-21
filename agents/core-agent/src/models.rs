@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -23,6 +23,41 @@ impl TelemetryEvent {
             source: source.to_string(),
             payload,
         }
+    }
+
+    pub fn alert(
+        timestamp: DateTime<Utc>,
+        event_type: &str,
+        severity: AlertSeverity,
+        title: &str,
+        mut payload: Value,
+    ) -> Self {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.entry("title".to_string())
+                .or_insert(Value::String(title.to_string()));
+            obj.entry("severity".to_string())
+                .or_insert(Value::String(severity.as_str().to_string()));
+            obj.entry("score".to_string())
+                .or_insert(Value::Number(serde_json::Number::from(severity.score())));
+        }
+
+        Self::new(timestamp, event_type, "core-agent/detection", payload)
+    }
+
+    pub fn response(
+        timestamp: DateTime<Utc>,
+        event_type: &str,
+        payload: Value,
+    ) -> Self {
+        Self::new(timestamp, event_type, "core-agent/response", payload)
+    }
+
+    pub fn state(
+        timestamp: DateTime<Utc>,
+        event_type: &str,
+        payload: Value,
+    ) -> Self {
+        Self::new(timestamp, event_type, "core-agent/state", payload)
     }
 }
 
@@ -52,6 +87,13 @@ impl AlertSeverity {
             AlertSeverity::High => 75,
             AlertSeverity::Critical => 95,
         }
+    }
+
+    pub fn as_payload(&self) -> Value {
+        json!({
+            "severity": self.as_str(),
+            "score": self.score()
+        })
     }
 }
 
