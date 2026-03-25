@@ -1,5 +1,6 @@
 use serde_json::{json, Value};
 use std::fs;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::process::Command;
 use tauri::{AppHandle, Emitter, Manager};
@@ -103,14 +104,68 @@ fn ensure_runtime_dirs() -> Result<PathBuf, String> {
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]
+fn get_log_path() -> String {
+    match log_file_path() {
+        Ok(p) => p.display().to_string(),
+        Err(e) => format!("error: {e}"),
+    }
+}
+
+#[tauri::command]
 fn read_agent_events() -> Result<Vec<String>, String> {
     let log_file = log_file_path()?;
     if !log_file.exists() {
         return Ok(vec![]);
     }
-    let contents = fs::read_to_string(&log_file)
-        .map_err(|e| format!("failed to read log file at {}: {e}", log_file.display()))?;
-    Ok(contents.lines().map(|l| l.to_string()).collect())
+
+    const TAIL_BYTES: u64 = 1_024 * 1_024; // 1 MB
+    const MAX_LINES: usize = 2000;
+
+    let mut file = fs::File::open(&log_file)
+        .map_err(|e| format!("failed to open log file at {}: {e}", log_file.display()))?;
+
+    let file_size = file
+        .seek(SeekFrom::End(0))
+        .map_err(|e| format!("failed to seek log file: {e}"))?;
+
+    let read_from = if file_size > TAIL_BYTES {
+        file_size - TAIL_BYTES
+    } else {
+        0
+    };
+
+    file.seek(SeekFrom::Start(read_from))
+        .map_err(|e| format!("failed to seek log file: {e}"))?;
+
+    let mut buf = Vec::with_capacity((file_size - read_from) as usize + 1);
+    file.read_to_end(&mut buf)
+        .map_err(|e| format!("failed to read log file: {e}"))?;
+
+    let text = String::from_utf8_lossy(&buf);
+
+    // If we seeked into the middle of the file, skip the first (likely partial) line.
+    let content = if read_from > 0 {
+        match text.find('\n') {
+            Some(pos) => &text[pos + 1..],
+            None => &text,
+        }
+    } else {
+        &text
+    };
+
+    let lines: Vec<String> = content
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.to_string())
+        .collect();
+
+    // Return the last MAX_LINES lines
+    let start = if lines.len() > MAX_LINES {
+        lines.len() - MAX_LINES
+    } else {
+        0
+    };
+    Ok(lines[start..].to_vec())
 }
 
 #[tauri::command]
@@ -248,23 +303,15 @@ fn quarantine_file(file_path: String) -> Result<(), String> {
 
 // ── AI explanation ───────────────────────────────────────────────────────────
 
-fn api_key_config_key() -> &'static str {
-    "anthropic_api_key"
-}
+const KEYCHAIN_SERVICE: &str = "com.agentsecurity.app";
+const KEYCHAIN_ACCOUNT: &str = "anthropic_api_key";
 
 fn read_api_key_inner() -> Option<String> {
-    let path = config_file_path().ok()?;
-    let contents = fs::read_to_string(&path).ok()?;
-    for line in contents.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix(api_key_config_key()) {
-            let val = rest.trim().trim_start_matches('=').trim().trim_matches('"').trim();
-            if !val.is_empty() {
-                return Some(val.to_string());
-            }
-        }
+    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT).ok()?;
+    match entry.get_password() {
+        Ok(key) if !key.trim().is_empty() => Some(key.trim().to_string()),
+        _ => None,
     }
-    None
 }
 
 #[tauri::command]
@@ -274,40 +321,15 @@ fn get_ai_configured() -> bool {
 
 #[tauri::command]
 fn set_api_key(key: String) -> Result<(), String> {
-    let path = config_file_path()?;
-
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("failed to create runtime dir: {e}"))?;
+    let trimmed = key.trim().to_string();
+    if trimmed.is_empty() {
+        return Err("API key cannot be empty".to_string());
     }
-
-    let existing = if path.exists() {
-        fs::read_to_string(&path).unwrap_or_default()
-    } else {
-        String::new()
-    };
-
-    let config_key = api_key_config_key();
-    let new_line = format!("{config_key} = \"{key}\"");
-    let updated = if existing.lines().any(|l| l.trim().starts_with(config_key)) {
-        existing
-            .lines()
-            .map(|l| {
-                if l.trim().starts_with(config_key) {
-                    new_line.as_str()
-                } else {
-                    l
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    } else if existing.trim().is_empty() {
-        new_line
-    } else {
-        format!("{}\n{}", existing.trim_end(), new_line)
-    };
-
-    fs::write(&path, updated).map_err(|e| format!("failed to write config: {e}"))
+    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
+        .map_err(|e| format!("keychain error: {e}"))?;
+    entry
+        .set_password(&trimmed)
+        .map_err(|e| format!("failed to save to keychain: {e}"))
 }
 
 #[tauri::command]
@@ -475,6 +497,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // ── Startup diagnostics ───────────────────────────────────────────
+            if let Ok(val) = std::env::var("AGENT_SECURITY_ROOT") {
+                eprintln!("[agent-security] AGENT_SECURITY_ROOT={val}");
+            }
             match project_root() {
                 Ok(root) => {
                     eprintln!("[agent-security] project root:  {}", root.display());
@@ -525,6 +550,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            get_log_path,
             read_agent_events,
             get_agent_status,
             get_simulation_mode,

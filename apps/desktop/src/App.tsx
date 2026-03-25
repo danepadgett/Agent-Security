@@ -27,6 +27,7 @@ export default function App() {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [logPath, setLogPath] = useState("");
   const [uptimeSeconds, setUptimeSeconds] = useState(0);
   const [aiConfigured, setAiConfigured] = useState(false);
   const prevIncidentIds = useRef<Set<string>>(new Set());
@@ -95,7 +96,13 @@ export default function App() {
       const lines = await invoke<string[]>("read_agent_events");
       const parsed = lines
         .filter((l) => l.trim().length > 0)
-        .map((l) => JSON.parse(l) as TelemetryEvent)
+        .flatMap((l) => {
+          try {
+            return [JSON.parse(l) as TelemetryEvent];
+          } catch {
+            return [];
+          }
+        })
         .sort((a, b) => getTimestampMs(a.timestamp) - getTimestampMs(b.timestamp));
       setEvents(parsed);
       setError("");
@@ -133,9 +140,13 @@ export default function App() {
 
   // Initial load
   useEffect(() => {
-    Promise.all([loadEvents(), loadAgentStatus(), loadAcknowledged(), loadAiConfigured()]).finally(
-      () => setLoading(false)
-    );
+    Promise.all([
+      loadEvents(),
+      loadAgentStatus(),
+      loadAcknowledged(),
+      loadAiConfigured(),
+      invoke<string>("get_log_path").then(setLogPath).catch(() => {}),
+    ]).finally(() => setLoading(false));
   }, [loadEvents, loadAgentStatus, loadAcknowledged, loadAiConfigured]);
 
   // Real-time updates
@@ -276,6 +287,7 @@ export default function App() {
             <SettingsView
               aiConfigured={aiConfigured}
               onAiConfigured={() => setAiConfigured(true)}
+              logPath={logPath}
             />
           </div>
         )}

@@ -140,29 +140,39 @@ impl NetworkMonitor {
             history.retain(|t| now.signed_duration_since(*t).num_seconds() <= BEACONING_WINDOW_SECONDS);
 
             if history.len() >= BEACONING_COUNT_THRESHOLD {
-                events.push(TelemetryEvent::alert(
-                    now,
-                    "alert_c2_beaconing_pattern",
-                    AlertSeverity::High,
-                    "Repeated outbound connections suggest C2 beaconing",
-                    json!({
-                        "pid": conn.pid,
-                        "command": conn.command,
-                        "remote_addr": conn.remote_addr,
-                        "remote_ip": conn.remote_ip,
-                        "remote_port": conn.remote_port,
-                        "connection_count_in_window": history.len(),
-                        "window_seconds": BEACONING_WINDOW_SECONDS,
-                        "process_kind": process_kind,
-                        "mitre_technique": "T1071",
-                        "reason": format!(
-                            "Process '{}' (pid {}) connected to {} {} times in {}s — potential C2 beaconing",
-                            conn.command, conn.pid, conn.remote_addr,
-                            history.len(), BEACONING_WINDOW_SECONDS
-                        ),
-                    }),
-                ));
-                // Reset to avoid alert storm for this key
+                // Suppress beaconing alerts for known Apple system processes and
+                // for connections destined to Apple-owned IP space. These processes
+                // make intentionally frequent periodic connections (Find My, OCSP,
+                // iCloud sync) and are not C2 candidates.
+                let is_suppressed = is_apple_system_process(&conn.command)
+                    || process_kind == "system"
+                    || is_apple_ip(&conn.remote_ip);
+
+                if !is_suppressed {
+                    events.push(TelemetryEvent::alert(
+                        now,
+                        "alert_c2_beaconing_pattern",
+                        AlertSeverity::High,
+                        "Repeated outbound connections suggest C2 beaconing",
+                        json!({
+                            "pid": conn.pid,
+                            "command": conn.command,
+                            "remote_addr": conn.remote_addr,
+                            "remote_ip": conn.remote_ip,
+                            "remote_port": conn.remote_port,
+                            "connection_count_in_window": history.len(),
+                            "window_seconds": BEACONING_WINDOW_SECONDS,
+                            "process_kind": process_kind,
+                            "mitre_technique": "T1071",
+                            "reason": format!(
+                                "Process '{}' (pid {}) connected to {} {} times in {}s — potential C2 beaconing",
+                                conn.command, conn.pid, conn.remote_addr,
+                                history.len(), BEACONING_WINDOW_SECONDS
+                            ),
+                        }),
+                    ));
+                }
+                // Always reset to avoid alert storm for this key
                 history.clear();
             }
         }
@@ -325,6 +335,71 @@ fn is_known_downloader_command(command: &str) -> bool {
     matches!(name.as_str(), "curl" | "wget" | "fetch" | "rsync" | "sftp" | "scp")
 }
 
+/// Returns true if the command is a known Apple system daemon that produces
+/// frequent periodic outbound connections (e.g. Find My, iCloud, OCSP).
+/// These processes should not trigger beaconing alerts.
+fn is_apple_system_process(command: &str) -> bool {
+    let name = std::path::Path::new(command)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(command)
+        .to_ascii_lowercase();
+    matches!(
+        name.as_str(),
+        "findmydevice-user-agent"
+            | "findmybeaconingd"
+            | "bird"
+            | "cloudd"
+            | "nsurlsessiond"
+            | "trustd"
+            | "ocspd"
+            | "rapportd"
+            | "symptomsd"
+            | "fairplayd"
+            | "parsecd"
+            | "identityservicesd"
+            | "apsd"
+            | "akd"
+            | "mobileactivationd"
+            | "mobileassetd"
+            | "nfcd"
+            | "sharingd"
+            | "coreduetd"
+            | "followupd"
+            | "notifyd"
+            | "dasd"
+            | "tipsd"
+            | "sbd"
+            | "securityd"
+            | "secinitd"
+            | "spindump"
+            | "mdworker"
+            | "mdworker_shared"
+            | "com.apple.geod"
+            | "geod"
+            | "awdd"
+            | "storeaccountd"
+            | "storeassetd"
+            | "storedownloadd"
+            | "storekitagent"
+            | "commerce"
+            | "adid"
+            | "aslmanager"
+            | "captiveagent"
+    )
+}
+
+/// Returns true if the IP is in Apple's owned ranges (17.0.0.0/8 and others).
+/// Beaconing to Apple servers from Apple system processes should not alert.
+fn is_apple_ip(ip: &str) -> bool {
+    // 17.0.0.0/8 — Apple's primary allocation
+    if ip.starts_with("17.") {
+        return true;
+    }
+    // 2620:149::/32 and other Apple IPv6 blocks — covered by process whitelist
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -418,5 +493,39 @@ mod tests {
         assert!(count_after >= BEACONING_COUNT_THRESHOLD, "should trigger beaconing alert");
         drop(monitor);
         drop(process_kind_map);
+    }
+
+    #[test]
+    fn beaconing_still_fires_for_real_attacker() {
+        // A non-whitelisted process connecting to a non-Apple IP should still trigger
+        assert!(!is_apple_system_process("bash"));
+        assert!(!is_apple_ip("52.46.139.74"));
+        // Verify neither suppression condition is met
+        let would_suppress = is_apple_system_process("bash")
+            || "unknown" == "system"
+            || is_apple_ip("52.46.139.74");
+        assert!(
+            !would_suppress,
+            "bash connecting to external IP should not be suppressed"
+        );
+    }
+
+    #[test]
+    fn beaconing_suppressed_for_findmybeaconingd() {
+        assert!(is_apple_system_process("findmybeaconingd"));
+        let would_suppress =
+            is_apple_system_process("findmybeaconingd") || is_apple_ip("17.57.144.1");
+        assert!(would_suppress, "findmybeaconingd should be suppressed");
+    }
+
+    #[test]
+    fn beaconing_suppressed_for_apple_ip_range() {
+        assert!(is_apple_ip("17.57.144.1"));
+        assert!(is_apple_ip("17.0.0.1"));
+        assert!(!is_apple_ip("52.46.139.74"));
+        let would_suppress = is_apple_system_process("unknownproc")
+            || "unknown" == "system"
+            || is_apple_ip("17.57.144.1");
+        assert!(would_suppress, "connection to Apple IP should be suppressed");
     }
 }

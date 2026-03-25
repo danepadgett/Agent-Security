@@ -32,7 +32,7 @@ use execution_graph::ExecutionGraphCache;
 use files::{collect_file_events, scan_directories, tracked_directories};
 use incidents::aggregate_incidents;
 use lineage::ProcessLineageCache;
-use logging::{append_event, append_response_audit};
+use logging::{append_event, append_response_audit, log_file_path, project_root_path};
 use models::{FileEventRecord, TelemetryEvent};
 use network::NetworkMonitor;
 use persistence_monitor::PersistenceMonitor;
@@ -61,6 +61,8 @@ fn main() -> Result<()> {
     let perf_report_mode = args.contains(&"--perf-report".to_string());
 
     println!("Core Agent Starting...");
+    println!("[core-agent] project root: {}", project_root_path().display());
+    println!("[core-agent] log file: {}", logging::log_file_path().display());
 
     let policy = load_policy()?;
     println!(

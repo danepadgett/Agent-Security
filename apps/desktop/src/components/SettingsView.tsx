@@ -5,9 +5,10 @@ import { CheckIcon, SparklesIcon } from "./icons";
 type Props = {
   aiConfigured: boolean;
   onAiConfigured: () => void;
+  logPath: string;
 };
 
-export function SettingsView({ aiConfigured, onAiConfigured }: Props) {
+export function SettingsView({ aiConfigured, onAiConfigured, logPath }: Props) {
   const [apiKey, setApiKey] = useState("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [saveError, setSaveError] = useState("");
@@ -34,7 +35,6 @@ export function SettingsView({ aiConfigured, onAiConfigured }: Props) {
         <div className="settings-section-title">AI Analysis</div>
         <div className="settings-section-desc">
           Explain security incidents in plain English using Claude. Requires an Anthropic API key.
-          Your key is stored locally in <code>runtime/agent-config.toml</code>.
         </div>
 
         <div className="settings-ai-status">
@@ -85,8 +85,8 @@ export function SettingsView({ aiConfigured, onAiConfigured }: Props) {
         </div>
 
         <div className="settings-note">
-          Keys are never sent to any server other than api.anthropic.com.
-          Only the incident summary (severity, signals, MITRE techniques) is included in the prompt — not file contents.
+          Your API key is stored securely in your macOS Keychain. It is never written to disk in plaintext.
+          Only incident metadata (severity, signals, MITRE techniques) is sent to the API — not file contents.
           AI analysis is opt-in and runs only when you click "Explain with AI."
         </div>
       </div>
@@ -97,6 +97,7 @@ export function SettingsView({ aiConfigured, onAiConfigured }: Props) {
           Core detection and response settings are managed in <code>runtime/agent-config.toml</code>.
           Use the Health dashboard to toggle simulation mode.
         </div>
+        <div className="settings-watch-path">Watching: <code>{logPath || "resolving…"}</code></div>
       </div>
     </div>
   );

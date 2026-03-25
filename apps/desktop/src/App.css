@@ -1578,3 +1578,16 @@ button:disabled {
   border-top: 1px solid var(--border-subtle);
   padding-top: 10px;
 }
+
+.settings-watch-path {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  word-break: break-all;
+}
+
+.settings-watch-path code {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  color: var(--text-secondary);
+}
