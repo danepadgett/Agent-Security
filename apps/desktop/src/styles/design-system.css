@@ -1,0 +1,130 @@
+/* Agent Security — Design System */
+
+:root {
+  /* Backgrounds */
+  --bg-base:     #080808;
+  --bg-surface:  #111111;
+  --bg-elevated: #1a1a1a;
+  --bg-hover:    #222222;
+
+  /* Borders */
+  --border-subtle:  rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.10);
+  --border-strong:  rgba(255, 255, 255, 0.18);
+
+  /* Text */
+  --text-primary:   #f2f2f2;
+  --text-secondary: #888888;
+  --text-tertiary:  #555555;
+
+  /* Accent */
+  --accent-blue:      #3b82f6;
+  --accent-blue-glow: rgba(59, 130, 246, 0.15);
+
+  /* Status */
+  --status-critical: #ef4444;
+  --status-high:     #f97316;
+  --status-medium:   #eab308;
+  --status-low:      #22c55e;
+  --status-clean:    #10b981;
+  --status-info:     #6b7280;
+
+  /* Status glows */
+  --status-glow-critical: rgba(239, 68,  68,  0.15);
+  --status-glow-high:     rgba(249, 115, 22,  0.12);
+  --status-glow-medium:   rgba(234, 179, 8,   0.12);
+  --status-glow-low:      rgba(34,  197, 94,  0.10);
+  --status-glow-clean:    rgba(16,  185, 129, 0.12);
+
+  /* Status subtle backgrounds */
+  --status-subtle-critical: rgba(239, 68,  68,  0.10);
+  --status-subtle-high:     rgba(249, 115, 22,  0.10);
+  --status-subtle-medium:   rgba(234, 179, 8,   0.10);
+  --status-subtle-low:      rgba(34,  197, 94,  0.08);
+  --status-subtle-clean:    rgba(16,  185, 129, 0.08);
+  --status-subtle-info:     rgba(107, 114, 128, 0.10);
+
+  /* Status borders */
+  --status-border-critical: rgba(239, 68,  68,  0.22);
+  --status-border-high:     rgba(249, 115, 22,  0.22);
+  --status-border-medium:   rgba(234, 179, 8,   0.22);
+  --status-border-low:      rgba(34,  197, 94,  0.16);
+  --status-border-clean:    rgba(16,  185, 129, 0.16);
+  --status-border-info:     rgba(107, 114, 128, 0.18);
+
+  /* Typography */
+  --font-sans: -apple-system, "SF Pro Display", BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "SF Mono", "Fira Code", "Cascadia Code", Menlo, monospace;
+
+  /* Radius */
+  --radius-sm:   6px;
+  --radius-md:   10px;
+  --radius-lg:   14px;
+  --radius-full: 9999px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+
+  /* Transitions */
+  --t-fast:  100ms ease;
+  --t-base:  150ms ease;
+  --t-slow:  250ms ease;
+  --t-color: 600ms ease;
+}
+
+/* Severity scoped variables — set data-sev="critical" etc. on container elements */
+[data-sev="critical"] { --sev: var(--status-critical); --sev-bg: var(--status-subtle-critical); --sev-border: var(--status-border-critical); --sev-glow: var(--status-glow-critical); }
+[data-sev="high"]     { --sev: var(--status-high);     --sev-bg: var(--status-subtle-high);     --sev-border: var(--status-border-high);     --sev-glow: var(--status-glow-high);     }
+[data-sev="medium"]   { --sev: var(--status-medium);   --sev-bg: var(--status-subtle-medium);   --sev-border: var(--status-border-medium);   --sev-glow: var(--status-glow-medium);   }
+[data-sev="low"]      { --sev: var(--status-low);      --sev-bg: var(--status-subtle-low);      --sev-border: var(--status-border-low);      --sev-glow: var(--status-glow-low);      }
+[data-sev="info"]     { --sev: var(--status-info);     --sev-bg: var(--status-subtle-info);     --sev-border: var(--status-border-info);     --sev-glow: rgba(107,114,128,0.08);       }
+
+/* ── Keyframes ─────────────────────────────────────────────────────────────── */
+
+@keyframes pulse-clean {
+  0%, 100% { transform: scale(1.0); filter: drop-shadow(0 0 12px var(--status-glow-clean)); }
+  50%       { transform: scale(1.03); filter: drop-shadow(0 0 20px var(--status-glow-clean)); }
+}
+@keyframes pulse-threat {
+  0%, 100% { transform: scale(1.0); filter: drop-shadow(0 0 14px var(--status-glow-critical)); }
+  50%       { transform: scale(1.06); filter: drop-shadow(0 0 24px var(--status-glow-critical)); }
+}
+@keyframes shimmer {
+  from { background-position: -300% 0; }
+  to   { background-position:  300% 0; }
+}
+@keyframes slide-in-right {
+  from { transform: translateX(14px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes toast-enter {
+  from { transform: translateY(10px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+@keyframes toast-leave {
+  from { transform: translateY(0);    opacity: 1; }
+  to   { transform: translateY(10px); opacity: 0; }
+}
+@keyframes radar {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes timeline-step-in {
+  from { transform: translateY(6px); opacity: 0; }
+  to   { transform: translateY(0);   opacity: 1; }
+}
+
+/* ── Reduced motion ────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration:       0.01ms !important;
+    animation-iteration-count: 1     !important;
+    transition-duration:      0.01ms !important;
+  }
+}

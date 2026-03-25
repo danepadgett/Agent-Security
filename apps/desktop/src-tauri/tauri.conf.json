@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "desktop",
+  "productName": "Agent Security",
   "version": "0.1.0",
   "identifier": "com.danepadgett.personalcyber",
   "build": {
@@ -12,9 +12,12 @@
   "app": {
     "windows": [
       {
-        "title": "desktop",
-        "width": 800,
-        "height": 600
+        "title": "Agent Security",
+        "width": 900,
+        "height": 650,
+        "resizable": false,
+        "center": true,
+        "label": "main"
       }
     ],
     "security": {

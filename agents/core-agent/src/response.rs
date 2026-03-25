@@ -8,13 +8,17 @@ use crate::state::{incident_key, response_action_key, AgentState};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const QUARANTINE_DIR: &str = "runtime/quarantine";
+const QUARANTINE_MANIFEST: &str = "runtime/quarantine/manifest.jsonl";
+/// Per-(incident_key, action_key) cooldown — prevents repeated kills of the same target.
 const RESPONSE_ACTION_COOLDOWN_SECONDS: i64 = 300;
+/// Per-incident cooldown — prevents any response on the same incident within this window.
+const RESPONSE_INCIDENT_COOLDOWN_SECONDS: i64 = 60;
 
 pub fn handle_detection(
     event: &TelemetryEvent,
@@ -26,6 +30,32 @@ pub fn handle_detection(
     let attack_chain_length = extract_attack_chain_length(event);
     let confidence = extract_confidence(event);
     let incident_key_value = incident_key(event);
+    let action_time = Utc::now();
+
+    // ── Per-incident response cooldown ────────────────────────────────────────
+    // RESPONSE IMPACT: prevents any response for the same incident within 60s.
+    // This is separate from the per-action 300s cooldown below.
+    if agent_state.is_incident_response_in_cooldown(
+        &incident_key_value,
+        action_time,
+        RESPONSE_INCIDENT_COOLDOWN_SECONDS,
+    ) {
+        out.push(build_response_event(
+            action_time,
+            "response_suppressed_by_incident_cooldown",
+            json!({
+                "action": "any",
+                "target_type": "incident",
+                "response_mode": response_mode(policy),
+                "outcome": "suppressed",
+                "original_event_type": event.event_type,
+                "incident_key": incident_key_value,
+                "cooldown_seconds": RESPONSE_INCIDENT_COOLDOWN_SECONDS,
+                "reason": "All responses suppressed: same incident triggered a response within the last 60 seconds"
+            }),
+        ));
+        return Ok(out);
+    }
 
     let kill_targets = scoped_process_kill_targets(event);
     let quarantine_targets = scoped_file_quarantine_targets(event);
@@ -377,6 +407,56 @@ pub fn handle_detection(
         }
     }
 
+    // If any actionable response was taken (executed or simulated), record the incident timestamp
+    // so the per-incident cooldown fires on the next invocation.
+    let any_executed = out.iter().any(|e| {
+        matches!(
+            e.event_type.as_str(),
+            "response_process_killed"
+                | "response_file_quarantined"
+                | "response_simulated_process_kill"
+                | "response_simulated_file_quarantine"
+        )
+    });
+    if any_executed {
+        agent_state.record_incident_response(&incident_key_value, action_time);
+
+        // Emit a user-facing notification event so the UI layer can surface what happened.
+        let action_summary: Vec<serde_json::Value> = out
+            .iter()
+            .filter(|e| e.event_type.starts_with("response_"))
+            .map(|e| {
+                json!({
+                    "event_type": e.event_type,
+                    "outcome": e.payload.get("outcome").and_then(|v| v.as_str()).unwrap_or("unknown"),
+                    "target_type": e.payload.get("target_type").and_then(|v| v.as_str()).unwrap_or("unknown"),
+                    "pid": e.payload.get("pid"),
+                    "path": e.payload.get("path").or_else(|| e.payload.get("old_path")),
+                })
+            })
+            .collect();
+
+        out.push(build_response_event(
+            action_time,
+            "response_user_notification",
+            json!({
+                "incident_key": incident_key_value,
+                "original_event_type": event.event_type,
+                "response_mode": response_mode(policy),
+                "score": score,
+                "confidence": confidence,
+                "action_count": action_summary.len(),
+                "actions": action_summary,
+                "reason": format!(
+                    "Response actions taken for incident '{}': {} action(s) in {} mode",
+                    incident_key_value,
+                    action_summary.len(),
+                    response_mode(policy)
+                ),
+            }),
+        ));
+    }
+
     Ok(out)
 }
 
@@ -658,7 +738,30 @@ fn quarantine_priority(path: &str) -> (u8, String) {
     (bucket, lower)
 }
 
+/// Kill `pid` and all of its descendants (leaves first).
+///
+/// Returns `(root_killed, child_pids_killed)` where `root_killed` is whether
+/// the target PID itself was successfully killed.
+///
+/// // RESPONSE IMPACT: This replaces single-process kill with full subtree kill.
+/// Guardrails (safe process kinds, system paths) are applied to the root target
+/// before this is called. Children are killed without re-checking guardrails
+/// because they are descendants of an already-confirmed malicious process.
+/// The response engine should only reach this path after guardrail checks pass.
 fn kill_process(pid: i32) -> Result<bool> {
+    let children = collect_process_subtree(pid);
+
+    // Kill children first (leaves → root order), then the root
+    for &child_pid in &children {
+        if child_pid == pid {
+            continue;
+        }
+        // Best-effort: ignore individual child kill errors
+        let _ = Command::new("kill")
+            .args(["-9", &child_pid.to_string()])
+            .status();
+    }
+
     let status = Command::new("kill")
         .args(["-9", &pid.to_string()])
         .status()
@@ -667,11 +770,65 @@ fn kill_process(pid: i32) -> Result<bool> {
     Ok(status.success())
 }
 
+/// Collect all descendant PIDs of `root_pid` by parsing `ps -axo pid=,ppid=`.
+/// Returns a list of descendant PIDs in leaves-first order (so they can be
+/// killed before their parents), NOT including `root_pid` itself.
+///
+/// If `ps` fails or `root_pid` has no children, returns an empty Vec.
+fn collect_process_subtree(root_pid: i32) -> Vec<i32> {
+    let output = Command::new("ps")
+        .args(["-axo", "pid=,ppid="])
+        .output();
+
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Build parent → children map
+    let mut children_map: HashMap<i32, Vec<i32>> = HashMap::new();
+    for line in stdout.lines() {
+        let mut parts = line.split_whitespace();
+        let pid_str = parts.next().unwrap_or("");
+        let ppid_str = parts.next().unwrap_or("");
+        let (Ok(pid), Ok(ppid)) = (pid_str.parse::<i32>(), ppid_str.parse::<i32>()) else {
+            continue;
+        };
+        children_map.entry(ppid).or_default().push(pid);
+    }
+
+    // BFS from root_pid to collect all descendants
+    let mut queue = vec![root_pid];
+    let mut ordered: Vec<i32> = Vec::new(); // BFS order (root first)
+    let mut visited = BTreeSet::new();
+    visited.insert(root_pid);
+
+    while let Some(current) = queue.first().copied() {
+        queue.remove(0);
+        if let Some(kids) = children_map.get(&current) {
+            for &child in kids {
+                if visited.insert(child) {
+                    queue.push(child);
+                    ordered.push(child);
+                }
+            }
+        }
+    }
+
+    // Return in reverse BFS order so leaves are killed before parents
+    ordered.reverse();
+    ordered
+}
+
 fn quarantine_file(original_path: &str) -> Result<Option<String>> {
     let source = Path::new(original_path);
     if !source.exists() {
         return Ok(None);
     }
+
+    // Compute SHA256 before moving the file so we have a hash for rollback verification.
+    let sha256 = compute_sha256(original_path).unwrap_or_else(|_| "unknown".to_string());
 
     fs::create_dir_all(QUARANTINE_DIR)
         .with_context(|| format!("failed to create {}", QUARANTINE_DIR))?;
@@ -693,5 +850,179 @@ fn quarantine_file(original_path: &str) -> Result<Option<String>> {
         )
     })?;
 
-    Ok(Some(dest_path.to_string_lossy().to_string()))
+    let dest_str = dest_path.to_string_lossy().to_string();
+
+    // Append an entry to the quarantine manifest so rollback can verify integrity.
+    append_quarantine_manifest(original_path, &dest_str, &sha256);
+
+    Ok(Some(dest_str))
+}
+
+/// Compute the SHA256 hex digest of a file using the macOS `shasum` CLI.
+/// Returns the hex digest string (64 hex chars) on success.
+fn compute_sha256(path: &str) -> Result<String> {
+    let output = Command::new("shasum")
+        .args(["-a", "256", path])
+        .output()
+        .context("shasum not available")?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // shasum output format: "<hex>  <filename>"
+    let hex = stdout
+        .split_whitespace()
+        .next()
+        .filter(|s| s.len() == 64)
+        .map(|s| s.to_string())
+        .ok_or_else(|| anyhow::anyhow!("unexpected shasum output: {}", stdout.trim()))?;
+
+    Ok(hex)
+}
+
+/// Append a quarantine record to the manifest JSONL file.
+/// Failures are best-effort — we never want a manifest write to block quarantine.
+fn append_quarantine_manifest(original_path: &str, quarantine_path: &str, sha256: &str) {
+    use std::io::Write;
+    let entry = json!({
+        "timestamp": Utc::now().to_rfc3339(),
+        "original_path": original_path,
+        "quarantine_path": quarantine_path,
+        "sha256": sha256,
+    });
+    if let Ok(serialized) = serde_json::to_string(&entry) {
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(QUARANTINE_MANIFEST)
+        {
+            let _ = writeln!(f, "{serialized}");
+        }
+    }
+}
+
+/// Restore a quarantined file to its original path, verifying SHA256 integrity.
+///
+/// Reads the quarantine manifest to find the record for `quarantine_path`,
+/// recomputes the SHA256 of the quarantined file, and moves it back only if the
+/// hash matches the recorded value.
+///
+/// Returns a `response_rollback_executed` or `response_rollback_failed` event.
+pub fn rollback_quarantined_file(
+    quarantine_path: &str,
+    incident_key: &str,
+) -> TelemetryEvent {
+    let now = Utc::now();
+
+    let manifest_entry = read_manifest_entry(quarantine_path);
+
+    let Some(entry) = manifest_entry else {
+        return build_response_event(
+            now,
+            "response_rollback_failed",
+            json!({
+                "action": "file_rollback",
+                "outcome": "failed",
+                "quarantine_path": quarantine_path,
+                "incident_key": incident_key,
+                "reason": "No manifest entry found for this quarantine path — cannot verify integrity",
+            }),
+        );
+    };
+
+    let original_path = match entry.get("original_path").and_then(|v| v.as_str()) {
+        Some(p) => p.to_string(),
+        None => {
+            return build_response_event(
+                now,
+                "response_rollback_failed",
+                json!({
+                    "action": "file_rollback",
+                    "outcome": "failed",
+                    "quarantine_path": quarantine_path,
+                    "incident_key": incident_key,
+                    "reason": "Manifest entry missing original_path field",
+                }),
+            );
+        }
+    };
+
+    let expected_sha256 = entry
+        .get("sha256")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+
+    // Recompute SHA256 of the quarantined file to verify it hasn't been tampered with.
+    match compute_sha256(quarantine_path) {
+        Ok(current_sha256) if current_sha256 == expected_sha256 || expected_sha256 == "unknown" => {
+            // Hash matches (or was never computed) — safe to restore.
+            match fs::rename(quarantine_path, &original_path) {
+                Ok(()) => build_response_event(
+                    now,
+                    "response_rollback_executed",
+                    json!({
+                        "action": "file_rollback",
+                        "outcome": "executed",
+                        "quarantine_path": quarantine_path,
+                        "original_path": original_path,
+                        "sha256_verified": expected_sha256 != "unknown",
+                        "incident_key": incident_key,
+                        "reason": "File restored from quarantine after SHA256 verification passed",
+                    }),
+                ),
+                Err(err) => build_response_event(
+                    now,
+                    "response_rollback_failed",
+                    json!({
+                        "action": "file_rollback",
+                        "outcome": "failed",
+                        "quarantine_path": quarantine_path,
+                        "original_path": original_path,
+                        "incident_key": incident_key,
+                        "reason": format!("fs::rename failed: {}", err),
+                    }),
+                ),
+            }
+        }
+        Ok(current_sha256) => build_response_event(
+            now,
+            "response_rollback_failed",
+            json!({
+                "action": "file_rollback",
+                "outcome": "failed",
+                "quarantine_path": quarantine_path,
+                "original_path": original_path,
+                "incident_key": incident_key,
+                "expected_sha256": expected_sha256,
+                "actual_sha256": current_sha256,
+                "reason": "SHA256 mismatch: quarantined file may have been modified, refusing rollback",
+            }),
+        ),
+        Err(err) => build_response_event(
+            now,
+            "response_rollback_failed",
+            json!({
+                "action": "file_rollback",
+                "outcome": "failed",
+                "quarantine_path": quarantine_path,
+                "incident_key": incident_key,
+                "reason": format!("Could not compute SHA256 for integrity check: {}", err),
+            }),
+        ),
+    }
+}
+
+/// Read the most recent manifest entry for `quarantine_path` from QUARANTINE_MANIFEST.
+fn read_manifest_entry(quarantine_path: &str) -> Option<serde_json::Value> {
+    let content = fs::read_to_string(QUARANTINE_MANIFEST).ok()?;
+    // Iterate in reverse to find the most recent entry for this quarantine path.
+    content
+        .lines()
+        .rev()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|entry| {
+            entry
+                .get("quarantine_path")
+                .and_then(|v| v.as_str())
+                .map(|p| p == quarantine_path)
+                .unwrap_or(false)
+        })
 }

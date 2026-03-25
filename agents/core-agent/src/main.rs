@@ -1,7 +1,10 @@
 mod baseline;
 mod classify;
 mod command_features;
+mod command_patterns;
 mod config;
+mod config_integrity;
+mod perf;
 mod detections;
 mod evidence;
 mod execution_graph;
@@ -11,6 +14,8 @@ mod incidents;
 mod lineage;
 mod logging;
 mod models;
+mod network;
+mod persistence_monitor;
 mod processes;
 mod provenance;
 mod replay;
@@ -29,6 +34,8 @@ use incidents::aggregate_incidents;
 use lineage::ProcessLineageCache;
 use logging::{append_event, append_response_audit};
 use models::{FileEventRecord, TelemetryEvent};
+use network::NetworkMonitor;
+use persistence_monitor::PersistenceMonitor;
 use provenance::ArtifactProvenanceCache;
 use response::handle_detection;
 use state::{normalize_state_summary, AgentState};
@@ -50,6 +57,9 @@ fn main() -> Result<()> {
         return replay::run_replay(&replay_path);
     }
 
+    let args: Vec<String> = env::args().collect();
+    let perf_report_mode = args.contains(&"--perf-report".to_string());
+
     println!("Core Agent Starting...");
 
     let policy = load_policy()?;
@@ -61,6 +71,29 @@ fn main() -> Result<()> {
         policy.kill_threshold,
         policy.quarantine_threshold
     );
+
+    // ── Performance tracker ────────────────────────────────────────────────────
+    // Throttle kicks in if any subsystem exceeds 50ms in a single loop iteration.
+    let mut perf = perf::PerfTracker::new(50_000, 50);
+    perf.capture_rss_baseline();
+
+    // ── Self-protection: startup integrity check ───────────────────────────────
+    let (mut integrity_state, startup_tamper_events) = config_integrity::startup_check();
+    for tamper in &startup_tamper_events {
+        let event = models::TelemetryEvent::new(
+            Utc::now(),
+            tamper.kind.as_event_type(),
+            "core-agent/self-protection",
+            serde_json::json!({
+                "severity": tamper.kind.severity(),
+                "category": "defense_evasion",
+                "reason": &tamper.detail,
+                "details": { "detail": &tamper.detail },
+            }),
+        );
+        println!("TAMPER DETECTED at startup: {} — {}", tamper.kind.as_event_type(), tamper.detail);
+        let _ = logging::append_event(&event);
+    }
 
     let watch_dirs = tracked_directories();
     println!("Watching directories:");
@@ -77,6 +110,8 @@ fn main() -> Result<()> {
     let mut provenance_cache = ArtifactProvenanceCache::new(PROVENANCE_STATE_TTL_SECONDS);
     let mut baseline_profile = BaselineProfile::new(BASELINE_STATE_TTL_SECONDS);
     let mut agent_state = AgentState::new();
+    let mut persistence_monitor = PersistenceMonitor::new();
+    let mut network_monitor = NetworkMonitor::new();
     let mut startup_completed = false;
     let mut loop_counter: u64 = 0;
 
@@ -84,6 +119,8 @@ fn main() -> Result<()> {
         let now = Utc::now();
         loop_counter += 1;
 
+        // ── File monitor ───────────────────────────────────────────────────────
+        let t_file = std::time::Instant::now();
         let (new_snapshot, file_events) =
             collect_file_events(&watch_dirs, &previous_file_snapshot, now)?;
         previous_file_snapshot = new_snapshot;
@@ -97,7 +134,10 @@ fn main() -> Result<()> {
         trim_recent_file_events(&mut recent_file_events, 300);
         trim_alert_cache(&mut alert_last_seen, 600, now);
         agent_state.prune(now, INCIDENT_STATE_TTL_SECONDS, RESPONSE_STATE_TTL_SECONDS);
+        perf.record_raw("file_monitor", t_file.elapsed());
 
+        // ── Process monitor ────────────────────────────────────────────────────
+        let t_proc = std::time::Instant::now();
         let (new_process_snapshot, process_events) =
             processes::collect_new_process_events(&known_processes, now)?;
         known_processes = new_process_snapshot;
@@ -127,8 +167,35 @@ fn main() -> Result<()> {
         provenance_cache.ingest_file_events(&current_file_window, now);
         provenance_cache.ingest_processes(&recent_processes, now);
         baseline_profile.ingest_processes(&current_processes, now);
+        perf.record_raw("process_monitor", t_proc.elapsed());
 
         if startup_completed {
+            // ── Persistence monitor (crontab + loginwindow hooks) ──────────────
+            let t_persist = std::time::Instant::now();
+            let persistence_events = persistence_monitor.check_and_update(now);
+            for event in &persistence_events {
+                println!("PERSISTENCE: {}", event.event_type);
+                append_event(event)?;
+            }
+            perf.record_raw("persistence_monitor", t_persist.elapsed());
+
+            // ── Network telemetry ──────────────────────────────────────────────
+            let t_net = std::time::Instant::now();
+            // Build a pid → process_kind map for connection classification
+            let process_kind_map: HashMap<i32, String> = current_processes
+                .iter()
+                .map(|p| (p.pid, p.process_kind.clone()))
+                .collect();
+
+            let network_events = network_monitor.snapshot_and_detect(&process_kind_map, now);
+            for event in &network_events {
+                if event.event_type.starts_with("alert_") {
+                    println!("NETWORK ALERT: {}", event.event_type);
+                }
+                append_event(event)?;
+            }
+            perf.record_raw("network_monitor", t_net.elapsed());
+
             let detection_context = DetectionContext {
                 recent_file_events: current_file_window.clone(),
                 recent_processes: recent_processes.clone(),
@@ -140,6 +207,7 @@ fn main() -> Result<()> {
                 now,
             };
 
+            let t_detect = std::time::Instant::now();
             let detection_events = evaluate_detections(&detection_context);
             for detection in &detection_events {
                 if should_emit_alert(
@@ -151,7 +219,9 @@ fn main() -> Result<()> {
                     append_event(detection)?;
                 }
             }
+            perf.record_raw("detection_eval", t_detect.elapsed());
 
+            let t_incident = std::time::Instant::now();
             let incident_events = aggregate_incidents(&detection_events, now);
             for incident in incident_events {
                 let (should_emit_incident, record) =
@@ -218,6 +288,30 @@ fn main() -> Result<()> {
                     );
                 }
             }
+            perf.record_raw("incident_correlation", t_incident.elapsed());
+
+            // ── Periodic integrity check ───────────────────────────────────────
+            if loop_counter % 240 == 0 {
+                // ~60 seconds at 250ms cadence
+                let tamper_events = config_integrity::periodic_check(&mut integrity_state);
+                for tamper in &tamper_events {
+                    let event = models::TelemetryEvent::new(
+                        now,
+                        tamper.kind.as_event_type(),
+                        "core-agent/self-protection",
+                        serde_json::json!({
+                            "severity": tamper.kind.severity(),
+                            "category": "defense_evasion",
+                            "reason": &tamper.detail,
+                            "details": { "detail": &tamper.detail },
+                        }),
+                    );
+                    println!("TAMPER: {} — {}", tamper.kind.as_event_type(), tamper.detail);
+                    let _ = logging::append_event(&event);
+                }
+                // Snapshot current log manifest once per minute
+                config_integrity::update_log_manifest(&mut integrity_state);
+            }
 
             if loop_counter % 30 == 0 {
                 let state_summary = agent_state.snapshot_summary();
@@ -240,7 +334,19 @@ fn main() -> Result<()> {
             startup_completed = true;
         }
 
-        thread::sleep(Duration::from_millis(250));
+        // ── Perf flush and throttle ────────────────────────────────────────────
+        if perf.tick() {
+            perf.flush(&now);
+            if perf_report_mode {
+                perf.print_report();
+                // In --perf-report mode, run for one flush window then exit.
+                return Ok(());
+            }
+        }
+
+        let base_sleep = Duration::from_millis(250);
+        let throttle_extra = Duration::from_millis(perf.throttle_extra_sleep_ms());
+        thread::sleep(base_sleep + throttle_extra);
     }
 }
 

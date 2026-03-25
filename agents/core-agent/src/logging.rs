@@ -6,7 +6,7 @@ use std::path::Path;
 
 const LOG_DIR: &str = "runtime/logs";
 const EVENT_LOG_FILE: &str = "runtime/logs/agent-events.jsonl";
-const RESPONSE_AUDIT_LOG_FILE: &str = "runtime/logs/response-actions.jsonl";
+const RESPONSE_AUDIT_LOG_FILE: &str = "runtime/logs/response-audit.jsonl";
 
 pub fn append_event(event: &TelemetryEvent) -> Result<()> {
     append_jsonl(EVENT_LOG_FILE, event)

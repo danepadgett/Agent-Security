@@ -27,6 +27,9 @@ pub struct ResponseActionRecord {
 pub struct AgentState {
     incidents: HashMap<String, IncidentRecord>,
     response_actions: HashMap<String, ResponseActionRecord>,
+    /// Tracks the last time any response was taken for a given incident key.
+    /// Used to enforce a per-incident response cooldown independent of action type.
+    last_response_per_incident: HashMap<String, DateTime<Utc>>,
 }
 
 impl AgentState {
@@ -34,7 +37,31 @@ impl AgentState {
         Self {
             incidents: HashMap::new(),
             response_actions: HashMap::new(),
+            last_response_per_incident: HashMap::new(),
         }
+    }
+
+    /// Check whether any response is allowed for `incident_key` right now.
+    /// Returns `false` if the same incident had a response taken within `cooldown_seconds`.
+    pub fn is_incident_response_in_cooldown(
+        &self,
+        incident_key: &str,
+        now: DateTime<Utc>,
+        cooldown_seconds: i64,
+    ) -> bool {
+        if let Some(&last) = self.last_response_per_incident.get(incident_key) {
+            let age = now.signed_duration_since(last).num_seconds();
+            if age < cooldown_seconds {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Record that a response action was taken for `incident_key` at `now`.
+    pub fn record_incident_response(&mut self, incident_key: &str, now: DateTime<Utc>) {
+        self.last_response_per_incident
+            .insert(incident_key.to_string(), now);
     }
 
     pub fn register_incident(&mut self, event: &TelemetryEvent) -> IncidentRecord {
@@ -135,6 +162,10 @@ impl AgentState {
         let action_cutoff = now - Duration::seconds(action_ttl_seconds);
         self.response_actions
             .retain(|_, record| record.last_executed >= action_cutoff);
+
+        // Trim the incident-level response cooldown map with the same TTL as actions
+        self.last_response_per_incident
+            .retain(|_, &mut ts| now.signed_duration_since(ts).num_seconds() <= action_ttl_seconds);
     }
 
     pub fn snapshot_summary(&self) -> serde_json::Value {
@@ -253,4 +284,59 @@ pub fn normalize_state_summary(value: &serde_json::Value) -> BTreeMap<String, St
     }
 
     out
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+
+    // ── incident-level response cooldown ──────────────────────────────────────
+
+    #[test]
+    fn incident_cooldown_blocks_within_window() {
+        let mut state = AgentState::new();
+        let now = Utc::now();
+        state.record_incident_response("incident:abc", now);
+
+        // Immediately after recording, should be in cooldown
+        assert!(
+            state.is_incident_response_in_cooldown("incident:abc", now, 60),
+            "should be in cooldown immediately after recording"
+        );
+    }
+
+    #[test]
+    fn incident_cooldown_allows_after_window_expires() {
+        let mut state = AgentState::new();
+        let past = Utc::now() - chrono::Duration::seconds(61);
+        state.record_incident_response("incident:abc", past);
+
+        let now = Utc::now();
+        assert!(
+            !state.is_incident_response_in_cooldown("incident:abc", now, 60),
+            "should not be in cooldown after 61s have passed"
+        );
+    }
+
+    #[test]
+    fn incident_cooldown_does_not_affect_different_incident() {
+        let mut state = AgentState::new();
+        let now = Utc::now();
+        state.record_incident_response("incident:abc", now);
+
+        assert!(
+            !state.is_incident_response_in_cooldown("incident:xyz", now, 60),
+            "cooldown for one incident should not affect a different incident"
+        );
+    }
+
+    #[test]
+    fn incident_cooldown_allows_when_never_recorded() {
+        let state = AgentState::new();
+        let now = Utc::now();
+        assert!(
+            !state.is_incident_response_in_cooldown("incident:new", now, 60),
+            "should not be in cooldown when no response has been recorded"
+        );
+    }
 }

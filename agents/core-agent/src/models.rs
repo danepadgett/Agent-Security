@@ -161,6 +161,10 @@ pub struct FileEventRecord {
     pub is_executable: bool,
     pub has_quarantine: bool,
     pub quarantine_value: Option<String>,
+    /// Short human-readable tag for the actual file content magic bytes,
+    /// e.g. "elf", "macho64", "macho32", "macho_fat", "zip", "pdf".
+    /// None when the file could not be read or has no recognized signature.
+    pub magic_bytes_hint: Option<String>,
 }
 
 impl From<&FileEvent> for FileEventRecord {
@@ -185,6 +189,10 @@ impl From<&FileEvent> for FileEventRecord {
                 .unwrap_or(false),
             quarantine_value: payload
                 .get("quarantine_value")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            magic_bytes_hint: payload
+                .get("magic_bytes_hint")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
         }

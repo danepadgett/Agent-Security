@@ -20,6 +20,15 @@ pub fn tracked_directories() -> Vec<PathBuf> {
         PathBuf::from(format!("{home}/Desktop")),
         PathBuf::from(format!("{home}/Documents")),
         PathBuf::from(format!("{home}/Library/LaunchAgents")),
+        PathBuf::from(format!("{home}/Library/LaunchDaemons")),
+        PathBuf::from("/etc/periodic/daily"),
+        PathBuf::from("/etc/periodic/weekly"),
+        PathBuf::from("/etc/periodic/monthly"),
+        // Credential access monitoring (T1552.004, T1552.001)
+        PathBuf::from(format!("{home}/.ssh")),
+        PathBuf::from(format!("{home}/.aws")),
+        // Login item persistence — BTM database (T1547.001)
+        PathBuf::from("/var/db/com.apple.backgroundtaskmanagement"),
     ]
 }
 
@@ -119,6 +128,13 @@ fn build_file_event(
     snapshot: &FileSnapshot,
     now: DateTime<Utc>,
 ) -> FileEvent {
+    // Only read magic bytes for new or modified files — not for permission/quarantine changes.
+    let magic_hint = if matches!(kind, "file_created" | "file_modified") {
+        read_magic_bytes_hint(&path)
+    } else {
+        None
+    };
+
     let telemetry_event = TelemetryEvent::new(
         now,
         kind,
@@ -128,7 +144,8 @@ fn build_file_event(
             "size_bytes": snapshot.size_bytes,
             "is_executable": snapshot.is_executable,
             "has_quarantine": snapshot.has_quarantine,
-            "quarantine_value": snapshot.quarantine_value
+            "quarantine_value": snapshot.quarantine_value,
+            "magic_bytes_hint": magic_hint,
         }),
     );
 
@@ -138,6 +155,43 @@ fn build_file_event(
         timestamp: now,
         telemetry_event,
     }
+}
+
+/// Read the first 8 bytes of `path` and return a short tag for the file type.
+///
+/// Recognized signatures:
+///   `\x7fELF`              → "elf"        (Linux/ELF — suspicious on macOS)
+///   `\xcf\xfa\xed\xfe`     → "macho64"    (Mach-O 64-bit little-endian)
+///   `\xce\xfa\xed\xfe`     → "macho32"    (Mach-O 32-bit little-endian)
+///   `\xca\xfe\xba\xbe`     → "macho_fat"  (Mach-O universal / fat binary)
+///   `PK\x03\x04`           → "zip"
+///   `%PDF`                 → "pdf"
+///   `\xff\xd8\xff`         → "jpeg"
+///   `\x89PNG`              → "png"
+///
+/// Returns None when the file cannot be read or bytes match no known signature.
+pub fn read_magic_bytes_hint(path: &Path) -> Option<String> {
+    use std::io::Read;
+    let mut buf = [0u8; 8];
+    let mut f = fs::File::open(path).ok()?;
+    let n = f.read(&mut buf).ok()?;
+    if n < 4 {
+        return None;
+    }
+
+    let tag = match &buf[..4] {
+        [0x7f, b'E', b'L', b'F'] => "elf",
+        [0xcf, 0xfa, 0xed, 0xfe] => "macho64",
+        [0xce, 0xfa, 0xed, 0xfe] => "macho32",
+        [0xca, 0xfe, 0xba, 0xbe] => "macho_fat",
+        [b'P', b'K', 0x03, 0x04] => "zip",
+        [b'%', b'P', b'D', b'F'] => "pdf",
+        [0xff, 0xd8, 0xff, _] => "jpeg",
+        [0x89, b'P', b'N', b'G'] => "png",
+        _ => return None,
+    };
+
+    Some(tag.to_string())
 }
 
 fn should_descend(entry: &DirEntry, root: &Path) -> bool {
