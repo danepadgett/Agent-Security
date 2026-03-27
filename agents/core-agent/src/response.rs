@@ -1,4 +1,4 @@
-use crate::config::ResponsePolicy;
+use crate::config::{read_live_whitelist, ResponsePolicy, Whitelist};
 use crate::guardrails::{
     path_kind, should_allow_file_quarantine, should_allow_process_kill, FileQuarantineRequest,
     ProcessKillRequest,
@@ -26,6 +26,7 @@ pub fn handle_detection(
     agent_state: &mut AgentState,
 ) -> Result<Vec<TelemetryEvent>> {
     let mut out = Vec::new();
+    let whitelist = read_live_whitelist();
     let score = alert_score(event);
     let attack_chain_length = extract_attack_chain_length(event);
     let confidence = extract_confidence(event);
@@ -104,6 +105,31 @@ pub fn handle_detection(
 
             match should_allow_process_kill(&request, policy) {
                 Ok(()) => {
+                    // ── Whitelist check ──────────────────────────────────────────────
+                    // RESPONSE IMPACT: whitelisted processes are never killed regardless
+                    // of simulation mode. Runs after guardrails, before any action.
+                    if let Some(matched_entry) = process_matches_whitelist(target.pid, &whitelist) {
+                        out.push(build_response_event(
+                            action_time,
+                            "response_blocked_by_whitelist",
+                            json!({
+                                "action": "process_kill",
+                                "target_type": "process",
+                                "response_mode": response_mode(policy),
+                                "outcome": "blocked",
+                                "original_event_type": event.event_type,
+                                "incident_key": incident_key_value,
+                                "action_key": action_key,
+                                "pid": target.pid,
+                                "process_kind": target.process_kind,
+                                "associated_path": target.associated_path,
+                                "matched_entry": matched_entry,
+                                "reason": format!("Process is trusted (matched whitelist entry: {matched_entry})")
+                            }),
+                        ));
+                        continue;
+                    }
+
                     if policy.simulation_mode {
                         out.push(build_response_event(
                             action_time,
@@ -284,6 +310,30 @@ pub fn handle_detection(
 
             match should_allow_file_quarantine(&request, policy) {
                 Ok(()) => {
+                    // ── Whitelist check ──────────────────────────────────────────────
+                    // RESPONSE IMPACT: files inside trusted app bundles bypass quarantine
+                    // regardless of simulation mode.
+                    if let Some(matched_entry) = file_matches_whitelist(&target.path, &whitelist) {
+                        out.push(build_response_event(
+                            action_time,
+                            "response_blocked_by_whitelist",
+                            json!({
+                                "action": "file_quarantine",
+                                "target_type": "file",
+                                "response_mode": response_mode(policy),
+                                "outcome": "blocked",
+                                "original_event_type": event.event_type,
+                                "incident_key": incident_key_value,
+                                "action_key": action_key,
+                                "path": target.path,
+                                "path_kind": classified_path_kind,
+                                "matched_entry": matched_entry,
+                                "reason": format!("File path is trusted (matched whitelist entry: {matched_entry})")
+                            }),
+                        ));
+                        continue;
+                    }
+
                     if policy.simulation_mode {
                         out.push(build_response_event(
                             action_time,
@@ -1025,4 +1075,73 @@ fn read_manifest_entry(quarantine_path: &str) -> Option<serde_json::Value> {
                 .map(|p| p == quarantine_path)
                 .unwrap_or(false)
         })
+}
+
+// ── Whitelist helpers ─────────────────────────────────────────────────────────
+
+/// Look up the binary path of a running process via `ps -p {pid} -o comm=`.
+/// Returns None if the process is not found or the command fails.
+fn get_process_binary_path(pid: i32) -> Option<String> {
+    let output = Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "comm="])
+        .output()
+        .ok()?;
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// Returns the matching whitelist entry if the process should be protected, or None.
+fn process_matches_whitelist(pid: i32, whitelist: &Whitelist) -> Option<String> {
+    if whitelist.trusted_process_paths.is_empty()
+        && whitelist.trusted_process_names.is_empty()
+        && whitelist.trusted_app_bundle_paths.is_empty()
+    {
+        return None;
+    }
+    let binary_path = get_process_binary_path(pid)?;
+
+    for trusted in &whitelist.trusted_process_paths {
+        if binary_path == *trusted {
+            return Some(trusted.clone());
+        }
+    }
+
+    let binary_name = Path::new(&binary_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(&binary_path);
+
+    for trusted in &whitelist.trusted_process_names {
+        if binary_name == trusted.as_str() {
+            return Some(trusted.clone());
+        }
+    }
+
+    for bundle in &whitelist.trusted_app_bundle_paths {
+        if binary_path.starts_with(bundle.as_str()) {
+            return Some(bundle.clone());
+        }
+    }
+
+    None
+}
+
+/// Returns the matching whitelist entry if the file should be protected, or None.
+fn file_matches_whitelist(file_path: &str, whitelist: &Whitelist) -> Option<String> {
+    for bundle in &whitelist.trusted_app_bundle_paths {
+        if file_path.starts_with(bundle.as_str()) {
+            return Some(bundle.clone());
+        }
+    }
+    for trusted in &whitelist.trusted_process_paths {
+        if file_path == trusted.as_str() {
+            return Some(trusted.clone());
+        }
+    }
+    None
 }

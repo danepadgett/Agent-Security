@@ -161,6 +161,10 @@ fn build_incident(acc: IncidentAccumulator, now: DateTime<Utc>) -> Option<Teleme
         .signal_set
         .contains("alert_downloaded_installer_activity");
 
+    let has_quarantine_activity = acc
+        .signal_set
+        .contains("alert_quarantined_file_activity");
+
     // New signals from this session
     let has_lolbin = acc.signal_set.contains("alert_lolbin_execution");
     let has_curl_pipe_bash = acc.signal_set.contains("alert_curl_pipe_bash");
@@ -208,6 +212,7 @@ fn build_incident(acc: IncidentAccumulator, now: DateTime<Utc>) -> Option<Teleme
         has_interpreter_downloads,
         has_shell_chain,
         has_exec_perm,
+        has_quarantine_activity,
         has_command_pattern,
         has_interpreter_abuse,
         has_follow_on_binary,
@@ -294,6 +299,7 @@ fn score_incident(
     has_interpreter_downloads: bool,
     has_shell_chain: bool,
     has_exec_perm: bool,
+    has_quarantine_activity: bool,
     has_command_pattern: bool,
     has_interpreter_abuse: bool,
     has_follow_on_binary: bool,
@@ -364,6 +370,14 @@ fn score_incident(
             name: "file_became_executable".to_string(),
             points: 10,
             reason: "A file gained executable permissions before or during execution".to_string(),
+        });
+    }
+
+    if has_quarantine_activity {
+        components.push(IncidentScoreComponent {
+            name: "quarantined_file_activity".to_string(),
+            points: 12,
+            reason: "A quarantined Downloads item was created or modified — indicates web-sourced content".to_string(),
         });
     }
 
@@ -668,7 +682,7 @@ fn score_incident(
     }
 
     let raw_score: u16 = components.iter().map(|c| c.points as u16).sum();
-    if raw_score < 40 {
+    if raw_score < 20 {
         return None;
     }
 
@@ -1474,7 +1488,7 @@ mod tests {
         // Then add tight_time_window bonus (8pts) = 50pts — should score
         let result = score_incident(
             false, false, false, false, false, false, false, false, false,
-            false, false, false, false,
+            false, false, false, false, false,
             false, true,  // has_curl_pipe_bash
             true,  false, false, false, false, false, false, false,  // has_command_injection
             false, false, false, false, false, // tranche 2 signals
@@ -1496,7 +1510,7 @@ mod tests {
     fn tight_time_window_bonus_does_not_fire_when_signals_spread_over_60s() {
         let result = score_incident(
             false, false, false, false, false, false, false, false, false,
-            false, false, false, false,
+            false, false, false, false, false,
             false, true, true, false, false, false, false, false, false, false,
             false, false, false, false, false,
             false, false, false, false, false, false,
@@ -1516,7 +1530,7 @@ mod tests {
     fn repeat_offender_bonus_fires_for_pid_with_3_plus_signals() {
         let result = score_incident(
             false, false, false, false, false, false, false, false, false,
-            false, false, false, false,
+            false, false, false, false, false,
             false, true, true, false, false, false, false, false, false, false,
             false, false, false, false, false,
             false, false, false, false, false, false,
@@ -1536,7 +1550,7 @@ mod tests {
     fn repeat_offender_bonus_does_not_fire_for_pid_with_2_signals() {
         let result = score_incident(
             false, false, false, false, false, false, false, false, false,
-            false, false, false, false,
+            false, false, false, false, false,
             false, true, true, false, false, false, false, false, false, false,
             false, false, false, false, false,
             false, false, false, false, false, false,
@@ -1558,7 +1572,7 @@ mod tests {
     fn ransomware_signal_scores_high() {
         let result = score_incident(
             false, false, false, false, false, false, false, false, false,
-            false, false, false, false,
+            false, false, false, false, false,
             false, false, false, false, false, false,
             true,  // has_ransomware — 30pts alone is below 40 threshold
             false, false, false,
@@ -1566,15 +1580,17 @@ mod tests {
             false, false, false, false, false, false,
             1, 1, u64::MAX, 1,
         );
-        // 30pts alone is below 40 threshold — but pair with one other signal
-        assert!(result.is_none(), "ransomware alone (30pts) is below 40pt threshold");
+        // 30pts alone exceeds the 20pt threshold
+        assert!(result.is_some(), "ransomware alone (30pts) exceeds 20pt threshold");
+        let breakdown = result.unwrap();
+        assert!(breakdown.components.iter().any(|c| c.name == "ransomware_behavior"));
     }
 
     #[test]
     fn curl_pipe_bash_plus_command_injection_reaches_threshold() {
         let result = score_incident(
             false, false, false, false, false, false, false, false, false,
-            false, false, false, false,
+            false, false, false, false, false,
             false, true, true, false, false, false, false, false, false, false,
             false, false, false, false, false,
             false, false, false, false, false, false,
@@ -1599,7 +1615,7 @@ mod tests {
     ) -> Option<crate::models::IncidentScoreBreakdown> {
         score_incident(
             false, false, false, false, false, false, false, false, false,
-            false, false, false, false,
+            false, false, false, false, false,
             false, false, false, false, false, false, false, false, false, false,
             screen_capture,
             data_staging,
@@ -1627,7 +1643,7 @@ mod tests {
         // add screen_capture = 16pts → 54pts ≥ 40
         let result = score_incident(
             false, false, false, false, false, false, false, false, false,
-            false, false, false, false,
+            false, false, false, false, false,
             false, false, false, true,  // has_keychain_access
             false, false, false, false, false, false,
             false, false, true,  // has_ssh_lateral

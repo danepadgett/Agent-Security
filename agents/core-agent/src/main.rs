@@ -25,11 +25,11 @@ mod state;
 use anyhow::Result;
 use baseline::BaselineProfile;
 use chrono::Utc;
-use config::load_policy;
+use config::{agent_config_path, load_policy, read_live_simulation_mode, read_live_whitelist};
 use detections::{evaluate_detections, DetectionContext};
 use evidence::write_incident_evidence_pack;
 use execution_graph::ExecutionGraphCache;
-use files::{collect_file_events, scan_directories, tracked_directories};
+use files::{FileMonitor, tracked_directories};
 use incidents::aggregate_incidents;
 use lineage::ProcessLineageCache;
 use logging::{append_event, append_response_audit, log_file_path, project_root_path};
@@ -58,16 +58,49 @@ fn main() -> Result<()> {
     }
 
     let args: Vec<String> = env::args().collect();
+
+    if args.contains(&"--list-whitelist".to_string()) {
+        let wl = read_live_whitelist();
+        println!("Trusted Process Paths ({}):", wl.trusted_process_paths.len());
+        if wl.trusted_process_paths.is_empty() {
+            println!("  (none)");
+        } else {
+            for p in &wl.trusted_process_paths { println!("  {p}"); }
+        }
+        println!("Trusted Process Names ({}):", wl.trusted_process_names.len());
+        if wl.trusted_process_names.is_empty() {
+            println!("  (none)");
+        } else {
+            for p in &wl.trusted_process_names { println!("  {p}"); }
+        }
+        println!("Trusted App Bundle Paths ({}):", wl.trusted_app_bundle_paths.len());
+        if wl.trusted_app_bundle_paths.is_empty() {
+            println!("  (none)");
+        } else {
+            for p in &wl.trusted_app_bundle_paths { println!("  {p}"); }
+        }
+        return Ok(());
+    }
+
     let perf_report_mode = args.contains(&"--perf-report".to_string());
+    // Counts how many flush windows have completed; used in --perf-report mode.
+    let mut perf_flush_count: u32 = 0;
 
     println!("Core Agent Starting...");
     println!("[core-agent] project root: {}", project_root_path().display());
-    println!("[core-agent] log file: {}", logging::log_file_path().display());
+    println!("[core-agent] log file:     {}", logging::log_file_path().display());
+    println!("[core-agent] config file:  {}", agent_config_path().display());
 
-    let policy = load_policy()?;
+    // SAFETY: default to simulation_mode=true; load_policy() will override only
+    // after successfully reading and confirming the value in agent-config.toml.
+    let mut policy = load_policy()?;
     println!(
-        "Response policy loaded: simulation_mode={}, enable_process_kill={}, enable_file_quarantine={}, kill_threshold={}, quarantine_threshold={}",
+        "[SAFETY] simulation_mode={} at startup (read from {})",
         policy.simulation_mode,
+        agent_config_path().display()
+    );
+    println!(
+        "Response policy: enable_process_kill={}, enable_file_quarantine={}, kill_threshold={}, quarantine_threshold={}",
         policy.enable_process_kill,
         policy.enable_file_quarantine,
         policy.kill_threshold,
@@ -103,9 +136,13 @@ fn main() -> Result<()> {
         println!(" - {}", dir.display());
     }
 
-    let mut previous_file_snapshot = scan_directories(&watch_dirs)?;
+    let mut file_monitor = FileMonitor::new(&watch_dirs)?;
     let mut known_processes = processes::snapshot_processes()?;
     let mut recent_file_events: VecDeque<FileEventRecord> = VecDeque::new();
+    // Rolling 60-second window of atomic detection events fed to the correlation engine.
+    // Detections from different ticks must be co-visible for cross-tick correlation to work
+    // (e.g. alert_quarantined_file_activity fires in tick N, alert_file_became_executable in tick N+k).
+    let mut recent_detections: VecDeque<TelemetryEvent> = VecDeque::new();
     let mut alert_last_seen: HashMap<String, chrono::DateTime<Utc>> = HashMap::new();
     let mut execution_graph = ExecutionGraphCache::new(300);
     let mut lineage_cache = ProcessLineageCache::new(LINEAGE_STATE_TTL_SECONDS);
@@ -123,9 +160,7 @@ fn main() -> Result<()> {
 
         // ── File monitor ───────────────────────────────────────────────────────
         let t_file = std::time::Instant::now();
-        let (new_snapshot, file_events) =
-            collect_file_events(&watch_dirs, &previous_file_snapshot, now)?;
-        previous_file_snapshot = new_snapshot;
+        let file_events = file_monitor.drain_events(now);
 
         for event in &file_events {
             println!("File event: kind={} path={}", event.kind, event.path.display());
@@ -223,8 +258,16 @@ fn main() -> Result<()> {
             }
             perf.record_raw("detection_eval", t_detect.elapsed());
 
+            // Accumulate detections into the 60-second rolling window, then pass
+            // the full window to aggregate_incidents so cross-tick signals can correlate.
+            for det in &detection_events {
+                recent_detections.push_back(det.clone());
+            }
+            trim_recent_detections(&mut recent_detections, 60, now);
+
             let t_incident = std::time::Instant::now();
-            let incident_events = aggregate_incidents(&detection_events, now);
+            let correlation_window: Vec<TelemetryEvent> = recent_detections.iter().cloned().collect();
+            let incident_events = aggregate_incidents(&correlation_window, now);
             for incident in incident_events {
                 let (should_emit_incident, record) =
                     agent_state.should_emit_incident(&incident, INCIDENT_EMIT_COOLDOWN_SECONDS);
@@ -238,6 +281,17 @@ fn main() -> Result<()> {
                         record.last_score
                     );
                     append_event(&incident)?;
+
+                    // Re-read simulation_mode from agent-config.toml immediately before
+                    // every response decision. This ensures the UI toggle takes effect
+                    // without requiring an agent restart.
+                    policy.simulation_mode = read_live_simulation_mode();
+                    println!(
+                        "[SAFETY] simulation_mode={} (live read from {} before response for incident {})",
+                        policy.simulation_mode,
+                        agent_config_path().display(),
+                        record.incident_key
+                    );
 
                     let response_events = handle_detection(&incident, &policy, &mut agent_state)?;
                     for response_event in &response_events {
@@ -340,15 +394,37 @@ fn main() -> Result<()> {
         if perf.tick() {
             perf.flush(&now);
             if perf_report_mode {
-                perf.print_report();
-                // In --perf-report mode, run for one flush window then exit.
-                return Ok(());
+                perf_flush_count += 1;
+                eprintln!(
+                    "[perf-report] flush {}/2 complete (loop {})",
+                    perf_flush_count, loop_counter
+                );
+                if perf_flush_count >= 2 {
+                    // Two full windows collected — print steady-state results and exit.
+                    perf.print_report();
+                    return Ok(());
+                }
             }
         }
 
         let base_sleep = Duration::from_millis(250);
         let throttle_extra = Duration::from_millis(perf.throttle_extra_sleep_ms());
         thread::sleep(base_sleep + throttle_extra);
+    }
+}
+
+fn trim_recent_detections(
+    queue: &mut VecDeque<TelemetryEvent>,
+    seconds_to_keep: i64,
+    now: chrono::DateTime<Utc>,
+) {
+    let cutoff = now - chrono::Duration::seconds(seconds_to_keep);
+    while let Some(front) = queue.front() {
+        if front.timestamp < cutoff {
+            queue.pop_front();
+        } else {
+            break;
+        }
     }
 }
 

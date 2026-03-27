@@ -37,6 +37,8 @@ pub struct NetworkMonitor {
     /// Set of (pid, remote_addr) pairs seen in the previous snapshot.
     /// Used to emit telemetry only for new connections, not existing ones.
     previous_connections: HashSet<(i32, String)>,
+    /// Cache of ip → hostname-is-known-good results to avoid repeated DNS lookups.
+    hostname_cache: HashMap<String, bool>,
 }
 
 const BEACONING_WINDOW_SECONDS: i64 = 300;
@@ -47,6 +49,7 @@ impl NetworkMonitor {
         Self {
             beaconing_history: HashMap::new(),
             previous_connections: HashSet::new(),
+            hostname_cache: HashMap::new(),
         }
     }
 
@@ -140,13 +143,19 @@ impl NetworkMonitor {
             history.retain(|t| now.signed_duration_since(*t).num_seconds() <= BEACONING_WINDOW_SECONDS);
 
             if history.len() >= BEACONING_COUNT_THRESHOLD {
-                // Suppress beaconing alerts for known Apple system processes and
-                // for connections destined to Apple-owned IP space. These processes
-                // make intentionally frequent periodic connections (Find My, OCSP,
-                // iCloud sync) and are not C2 candidates.
+                // Suppress beaconing alerts for known infrastructure:
+                // - Apple/Google system processes (Find My, OCSP, iCloud, etc.)
+                // - process_kind == "system" (macOS classified)
+                // - Known infrastructure IP ranges (Apple, Google, Cloudflare, AWS CDN)
+                // - Reverse DNS resolves to a known-good CDN/cloud hostname
+                let hostname_is_known_good = *self
+                    .hostname_cache
+                    .entry(conn.remote_ip.clone())
+                    .or_insert_with(|| reverse_lookup_is_known_good(&conn.remote_ip));
                 let is_suppressed = is_apple_system_process(&conn.command)
                     || process_kind == "system"
-                    || is_apple_ip(&conn.remote_ip);
+                    || is_known_infrastructure_ip(&conn.remote_ip)
+                    || hostname_is_known_good;
 
                 if !is_suppressed {
                     events.push(TelemetryEvent::alert(
@@ -389,15 +398,96 @@ fn is_apple_system_process(command: &str) -> bool {
     )
 }
 
-/// Returns true if the IP is in Apple's owned ranges (17.0.0.0/8 and others).
-/// Beaconing to Apple servers from Apple system processes should not alert.
-fn is_apple_ip(ip: &str) -> bool {
-    // 17.0.0.0/8 — Apple's primary allocation
+/// Returns true if the IP belongs to known infrastructure that should never trigger
+/// C2 beaconing alerts: Apple, Google, Cloudflare, and major CDN allocations.
+fn is_known_infrastructure_ip(ip: &str) -> bool {
+    // Apple: 17.0.0.0/8
     if ip.starts_with("17.") {
         return true;
     }
-    // 2620:149::/32 and other Apple IPv6 blocks — covered by process whitelist
+    // Google DNS: 8.8.0.0/16 (8.8.8.8, 8.8.4.4)
+    if ip.starts_with("8.8.") {
+        return true;
+    }
+    // Google services: 142.250.0.0/15 (142.250.x.x and 142.251.x.x)
+    if ip.starts_with("142.250.") || ip.starts_with("142.251.") {
+        return true;
+    }
+    // Google services: 172.217.0.0/16
+    if ip.starts_with("172.217.") {
+        return true;
+    }
+    // Google services: 216.58.0.0/16
+    if ip.starts_with("216.58.") {
+        return true;
+    }
+    // Google services: 74.125.0.0/16
+    if ip.starts_with("74.125.") {
+        return true;
+    }
+    // Cloudflare: 1.1.1.0/24 and 1.0.0.0/24
+    if ip.starts_with("1.1.1.") || ip.starts_with("1.0.0.") {
+        return true;
+    }
+    // Cloudflare: 104.16.0.0/13 (104.16–104.23.x.x)
+    if let Some(rest) = ip.strip_prefix("104.") {
+        if let Some(second_str) = rest.split('.').next() {
+            if let Ok(n) = second_str.parse::<u8>() {
+                if (16..=23).contains(&n) {
+                    return true;
+                }
+            }
+        }
+    }
     false
+}
+
+/// Domains whose reverse-DNS hostname suffix indicates known-good CDN/cloud infrastructure.
+/// Checked via a cached `host` lookup only when a beaconing alert would otherwise fire.
+static KNOWN_GOOD_DOMAIN_SUFFIXES: &[&str] = &[
+    "google.com",
+    "googleapis.com",
+    "gstatic.com",
+    "apple.com",
+    "icloud.com",
+    "amazonaws.com",
+    "cloudfront.net",
+    "cloudflare.com",
+    "akamai.net",
+    "akamaiedge.net",
+    "akamaitechnologies.com",
+    "fastly.net",
+];
+
+/// Reverse-resolve `ip` to a hostname and check whether it belongs to known-good infrastructure.
+/// Uses `host` with a background thread and 300ms timeout to avoid blocking the agent loop.
+fn reverse_lookup_is_known_good(ip: &str) -> bool {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let ip_owned = ip.to_string();
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let result = Command::new("host")
+            .arg(&ip_owned)
+            .output()
+            .map(|o| {
+                let text = String::from_utf8_lossy(&o.stdout).to_ascii_lowercase();
+                KNOWN_GOOD_DOMAIN_SUFFIXES
+                    .iter()
+                    .any(|suffix| text.contains(*suffix))
+            })
+            .unwrap_or(false);
+        let _ = tx.send(result);
+    });
+
+    rx.recv_timeout(Duration::from_millis(300)).unwrap_or(false)
+}
+
+/// Kept as a named alias for backwards-compatible test references.
+#[inline]
+fn is_apple_ip(ip: &str) -> bool {
+    ip.starts_with("17.")
 }
 
 #[cfg(test)]
@@ -520,12 +610,37 @@ mod tests {
 
     #[test]
     fn beaconing_suppressed_for_apple_ip_range() {
-        assert!(is_apple_ip("17.57.144.1"));
-        assert!(is_apple_ip("17.0.0.1"));
-        assert!(!is_apple_ip("52.46.139.74"));
+        assert!(is_known_infrastructure_ip("17.57.144.1"));
+        assert!(is_known_infrastructure_ip("17.0.0.1"));
+        assert!(!is_known_infrastructure_ip("52.46.139.74"));
         let would_suppress = is_apple_system_process("unknownproc")
             || "unknown" == "system"
-            || is_apple_ip("17.57.144.1");
+            || is_known_infrastructure_ip("17.57.144.1");
         assert!(would_suppress, "connection to Apple IP should be suppressed");
+    }
+
+    #[test]
+    fn google_ip_ranges_are_suppressed() {
+        // Google DNS
+        assert!(is_known_infrastructure_ip("8.8.8.8"));
+        assert!(is_known_infrastructure_ip("8.8.4.4"));
+        // Google services
+        assert!(is_known_infrastructure_ip("142.250.200.14"));
+        assert!(is_known_infrastructure_ip("142.251.1.1"));
+        assert!(is_known_infrastructure_ip("172.217.14.206"));
+        assert!(is_known_infrastructure_ip("216.58.201.46"));
+        assert!(is_known_infrastructure_ip("74.125.24.138"));
+        // Non-Google should not match
+        assert!(!is_known_infrastructure_ip("52.46.139.74"));
+        assert!(!is_known_infrastructure_ip("8.9.8.8")); // 8.9.x — not Google DNS block
+    }
+
+    #[test]
+    fn cloudflare_ip_ranges_are_suppressed() {
+        assert!(is_known_infrastructure_ip("1.1.1.1"));
+        assert!(is_known_infrastructure_ip("1.0.0.1"));
+        assert!(is_known_infrastructure_ip("104.16.0.1"));
+        assert!(is_known_infrastructure_ip("104.23.255.255"));
+        assert!(!is_known_infrastructure_ip("104.24.0.1")); // outside 104.16–23 range
     }
 }

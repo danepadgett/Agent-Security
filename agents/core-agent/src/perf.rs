@@ -11,11 +11,16 @@
 use std::collections::HashMap;
 use std::fs::{create_dir_all, OpenOptions};
 use std::io::Write;
-use std::path::Path;
+use std::path::PathBuf;
 use std::time::Duration;
 
 pub const FLUSH_INTERVAL_LOOPS: u64 = 120; // ~30 seconds at 250ms cadence
-const PERF_LOG_FILE: &str = "runtime/logs/perf-stats.jsonl";
+const PERF_LOG_RELATIVE: &str = "runtime/logs/perf-stats.jsonl";
+
+/// Absolute path to perf-stats.jsonl, resolved the same way as all other log paths.
+fn perf_log_path() -> PathBuf {
+    crate::logging::resolve_project_root().join(PERF_LOG_RELATIVE)
+}
 
 /// Aggregate stats for one subsystem over the flush window.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -170,14 +175,13 @@ impl PerfTracker {
     }
 
     /// Print a human-readable summary to stdout.  Called when `--perf-report` is passed.
-    pub fn print_report(&mut self) {
-        let now = chrono::Utc::now();
-        self.flush(&now);
-
-        // Re-read and pretty-print the last N lines.
-        let path = Path::new(PERF_LOG_FILE);
+    /// The caller is responsible for calling `flush()` before this — do NOT flush here or
+    /// the accumulators will already be empty and the report will show all zeros.
+    pub fn print_report(&self) {
+        // Re-read and pretty-print the last line of the perf log.
+        let path = perf_log_path();
         if !path.exists() {
-            println!("[perf] no data — perf-stats.jsonl not found");
+            println!("[perf] no data — perf-stats.jsonl not found at {}", path.display());
             return;
         }
 
@@ -221,17 +225,26 @@ impl PerfTracker {
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 fn append_perf_record(record: &serde_json::Value) {
-    let dir = Path::new("runtime/logs");
-    let _ = create_dir_all(dir);
+    let path = perf_log_path();
+    eprintln!("[perf] flushing to {}", path.display());
 
-    if let Ok(serialized) = serde_json::to_string(record) {
-        if let Ok(mut file) = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(PERF_LOG_FILE)
-        {
-            let _ = writeln!(file, "{serialized}");
+    if let Some(dir) = path.parent() {
+        if let Err(e) = create_dir_all(dir) {
+            eprintln!("[perf] failed to create log dir {}: {e}", dir.display());
+            return;
         }
+    }
+
+    match serde_json::to_string(record) {
+        Err(e) => eprintln!("[perf] failed to serialize record: {e}"),
+        Ok(serialized) => match OpenOptions::new().create(true).append(true).open(&path) {
+            Err(e) => eprintln!("[perf] failed to open {}: {e}", path.display()),
+            Ok(mut file) => {
+                if let Err(e) = writeln!(file, "{serialized}") {
+                    eprintln!("[perf] failed to write record: {e}");
+                }
+            }
+        },
     }
 }
 

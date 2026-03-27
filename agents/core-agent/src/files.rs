@@ -1,16 +1,19 @@
 use crate::models::{FileEvent, FileSnapshot, FileSnapshotMap, TelemetryEvent};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::ffi::CString;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 use std::time::UNIX_EPOCH;
 use walkdir::{DirEntry, WalkDir};
+
+// ── Watched directories ────────────────────────────────────────────────────────
 
 pub fn tracked_directories() -> Vec<PathBuf> {
     let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
@@ -32,7 +35,202 @@ pub fn tracked_directories() -> Vec<PathBuf> {
     ]
 }
 
-pub fn scan_directories(directories: &[PathBuf]) -> Result<FileSnapshotMap> {
+// ── FSEvents-based file monitor ────────────────────────────────────────────────
+
+/// Push-based file monitor backed by macOS FSEvents (via the `notify` crate).
+///
+/// On each main-loop tick, call `drain_events()`.  If no files have changed the
+/// call returns in microseconds.  If files have changed, only the changed paths
+/// are re-stat'd — no full directory walk.
+pub struct FileMonitor {
+    /// Known state of every tracked file (updated incrementally).
+    snapshot: FileSnapshotMap,
+    /// Receives FSEvents notifications from the background watcher thread.
+    rx: mpsc::Receiver<notify::Result<notify::Event>>,
+    /// Held to keep the FSEvents subscription alive.  Dropping this stops watching.
+    _watcher: RecommendedWatcher,
+    /// Canonical set of watched root directories (used for path filtering).
+    watch_dirs: Vec<PathBuf>,
+}
+
+impl FileMonitor {
+    /// Initialise the monitor:
+    ///   1. Take one full snapshot of all watched directories (baseline).
+    ///   2. Register FSEvents watches so future changes arrive via `drain_events`.
+    pub fn new(directories: &[PathBuf]) -> Result<Self> {
+        // Baseline snapshot — one-time walk, same logic as before.
+        let snapshot = scan_directories(directories)?;
+        eprintln!(
+            "[file_monitor] baseline snapshot: {} files across {} directories",
+            snapshot.len(),
+            directories.len()
+        );
+
+        // Channel connecting the watcher callback to the main loop.
+        let (tx, rx) = mpsc::channel::<notify::Result<notify::Event>>();
+
+        // Use a 250ms FSEvents coalescing latency so events arrive within one
+        // main-loop tick rather than the 2s default.  On macOS this maps directly
+        // to the kFSEventStream latency parameter.
+        let config = Config::default()
+            .with_poll_interval(std::time::Duration::from_millis(250));
+
+        let mut watcher = RecommendedWatcher::new(
+            move |res| {
+                // Silently drop if the receiver has gone away (e.g. during shutdown).
+                let _ = tx.send(res);
+            },
+            config,
+        )
+        .context("failed to create FSEvents watcher")?;
+
+        // Register each existing directory.  Non-existent paths (e.g. ~/.aws on a
+        // machine that has never run the AWS CLI) are silently skipped.
+        let mut registered = 0usize;
+        for dir in directories {
+            if !dir.exists() {
+                continue;
+            }
+            match watcher.watch(dir, RecursiveMode::Recursive) {
+                Ok(()) => {
+                    registered += 1;
+                    eprintln!("[file_monitor] watching: {}", dir.display());
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[file_monitor] WARNING: could not watch {}: {e}",
+                        dir.display()
+                    );
+                }
+            }
+        }
+        eprintln!("[file_monitor] FSEvents registered on {registered} paths");
+
+        Ok(Self {
+            snapshot,
+            rx,
+            _watcher: watcher,
+            watch_dirs: directories.to_vec(),
+        })
+    }
+
+    /// Drain all pending FSEvents notifications and return file events.
+    ///
+    /// - If nothing has changed: returns empty Vec in a few microseconds.
+    /// - If files changed: re-stats only the changed paths, diffs against the
+    ///   snapshot, generates events, and updates the snapshot.
+    pub fn drain_events(&mut self, now: DateTime<Utc>) -> Vec<FileEvent> {
+        // Collect every changed path from the channel, deduplicated.
+        let mut changed_paths: HashSet<PathBuf> = HashSet::new();
+        loop {
+            match self.rx.try_recv() {
+                Ok(Ok(event)) => {
+                    for path in event.paths {
+                        changed_paths.insert(path);
+                    }
+                }
+                Ok(Err(e)) => eprintln!("[file_monitor] watcher error: {e}"),
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    eprintln!("[file_monitor] watcher channel disconnected");
+                    break;
+                }
+            }
+        }
+
+        if changed_paths.is_empty() {
+            return Vec::new();
+        }
+
+        let mut events = Vec::new();
+
+        for path in changed_paths {
+            // Skip paths that aren't under a watched root (e.g. temp-file renames
+            // from outside our tree that FSEvents delivers as a side-effect).
+            if !self.is_watched_path(&path) {
+                continue;
+            }
+
+            match fs::metadata(&path) {
+                Ok(metadata) if metadata.is_file() => {
+                    let current = Self::snapshot_from_metadata(&path, &metadata);
+
+                    match self.snapshot.get(&path) {
+                        None => {
+                            // New file observed for the first time.
+                            events.push(build_file_event("file_created", path.clone(), &current, now));
+                            self.snapshot.insert(path, current);
+                        }
+                        Some(old) => {
+                            if old.modified_unix_seconds != current.modified_unix_seconds
+                                || old.size_bytes != current.size_bytes
+                            {
+                                events.push(build_file_event("file_modified", path.clone(), &current, now));
+                            }
+                            if !old.is_executable && current.is_executable {
+                                events.push(build_file_event(
+                                    "file_became_executable",
+                                    path.clone(),
+                                    &current,
+                                    now,
+                                ));
+                            }
+                            if !old.has_quarantine && current.has_quarantine {
+                                events.push(build_file_event(
+                                    "file_gained_quarantine",
+                                    path.clone(),
+                                    &current,
+                                    now,
+                                ));
+                            }
+                            self.snapshot.insert(path, current);
+                        }
+                    }
+                }
+                Ok(_) => {
+                    // A directory or symlink — nothing to do.
+                }
+                Err(_) => {
+                    // File deleted or inaccessible — remove from snapshot so a
+                    // future re-creation shows up as file_created again.
+                    self.snapshot.remove(&path);
+                }
+            }
+        }
+
+        events
+    }
+
+    fn is_watched_path(&self, path: &Path) -> bool {
+        self.watch_dirs.iter().any(|dir| path.starts_with(dir))
+    }
+
+    fn snapshot_from_metadata(path: &Path, metadata: &fs::Metadata) -> FileSnapshot {
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+
+        let mode = metadata.permissions().mode();
+        let is_executable = mode & 0o111 != 0;
+        let quarantine_value = get_quarantine_xattr(path);
+        let has_quarantine = quarantine_value.is_some();
+
+        FileSnapshot {
+            modified_unix_seconds: modified,
+            size_bytes: metadata.len(),
+            is_executable,
+            has_quarantine,
+            quarantine_value,
+        }
+    }
+}
+
+// ── Internal scan helpers (used for the initial baseline snapshot) ─────────────
+
+fn scan_directories(directories: &[PathBuf]) -> Result<FileSnapshotMap> {
     let mut snapshot: FileSnapshotMap = HashMap::new();
 
     for dir in directories {
@@ -46,8 +244,10 @@ pub fn scan_directories(directories: &[PathBuf]) -> Result<FileSnapshotMap> {
 
         for entry in walker.filter_map(|e| e.ok()).filter(|e| e.file_type().is_file()) {
             let path = entry.path().to_path_buf();
-            let metadata = fs::metadata(&path)
-                .with_context(|| format!("failed to read metadata for {}", path.display()))?;
+            let metadata = match fs::metadata(&path) {
+                Ok(m) => m,
+                Err(_) => continue, // Race: file disappeared between walk and stat
+            };
 
             let modified = metadata
                 .modified()
@@ -58,7 +258,6 @@ pub fn scan_directories(directories: &[PathBuf]) -> Result<FileSnapshotMap> {
 
             let mode = metadata.permissions().mode();
             let is_executable = mode & 0o111 != 0;
-
             let quarantine_value = get_quarantine_xattr(&path);
             let has_quarantine = quarantine_value.is_some();
 
@@ -78,49 +277,7 @@ pub fn scan_directories(directories: &[PathBuf]) -> Result<FileSnapshotMap> {
     Ok(snapshot)
 }
 
-pub fn collect_file_events(
-    directories: &[PathBuf],
-    previous: &FileSnapshotMap,
-    now: DateTime<Utc>,
-) -> Result<(FileSnapshotMap, Vec<FileEvent>)> {
-    let current = scan_directories(directories)?;
-    let mut events = Vec::new();
-
-    for (path, current_meta) in &current {
-        match previous.get(path) {
-            None => {
-                events.push(build_file_event("file_created", path.clone(), current_meta, now));
-            }
-            Some(old_meta) => {
-                if old_meta.modified_unix_seconds != current_meta.modified_unix_seconds
-                    || old_meta.size_bytes != current_meta.size_bytes
-                {
-                    events.push(build_file_event("file_modified", path.clone(), current_meta, now));
-                }
-
-                if !old_meta.is_executable && current_meta.is_executable {
-                    events.push(build_file_event(
-                        "file_became_executable",
-                        path.clone(),
-                        current_meta,
-                        now,
-                    ));
-                }
-
-                if !old_meta.has_quarantine && current_meta.has_quarantine {
-                    events.push(build_file_event(
-                        "file_gained_quarantine",
-                        path.clone(),
-                        current_meta,
-                        now,
-                    ));
-                }
-            }
-        }
-    }
-
-    Ok((current, events))
-}
+// ── Event builder ──────────────────────────────────────────────────────────────
 
 fn build_file_event(
     kind: &str,
@@ -156,6 +313,8 @@ fn build_file_event(
         telemetry_event,
     }
 }
+
+// ── Magic bytes detection ──────────────────────────────────────────────────────
 
 /// Read the first 8 bytes of `path` and return a short tag for the file type.
 ///
@@ -194,6 +353,8 @@ pub fn read_magic_bytes_hint(path: &Path) -> Option<String> {
     Some(tag.to_string())
 }
 
+// ── Walk helpers (used by the initial scan only) ───────────────────────────────
+
 fn should_descend(entry: &DirEntry, root: &Path) -> bool {
     if entry.depth() == 0 {
         return true;
@@ -229,6 +390,8 @@ fn is_bundle_like_dir(path: &Path) -> bool {
         || lower.ends_with(".zip")
         || lower.ends_with(".xip")
 }
+
+// ── xattr helpers ──────────────────────────────────────────────────────────────
 
 fn get_quarantine_xattr(path: &Path) -> Option<String> {
     let path_str = path.to_str()?;
