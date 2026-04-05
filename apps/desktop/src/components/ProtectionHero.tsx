@@ -42,7 +42,7 @@ export function ProtectionHero({
         <div className="hero-status-label" data-sev={sevAttr}>
           {statusLabel}
         </div>
-        <div className="hero-app-name">Agent Security</div>
+        <div className="hero-app-name">Hound</div>
       </div>
 
       <div className="hero-stats">

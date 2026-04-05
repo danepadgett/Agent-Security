@@ -159,6 +159,58 @@ export function SparklesIcon({ size = 14, ...props }: P) {
   );
 }
 
+export function ClockIcon({ size = 20, ...p }: P) {
+  return (
+    <svg {...base(size, p)}>
+      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5" />
+      <polyline points="12 6 12 12 16 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function BookOpenIcon({ size = 20, ...p }: P) {
+  return (
+    <svg {...base(size, p)}>
+      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function SearchIcon({ size = 16, ...p }: P) {
+  return (
+    <svg {...base(size, p)}>
+      <circle cx="11" cy="11" r="8" stroke="currentColor" strokeWidth="1.5" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function EyeIcon({ size = 20, ...p }: P) {
+  return (
+    <svg {...base(size, p)}>
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+export function FilterIcon({ size = 16, ...p }: P) {
+  return (
+    <svg {...base(size, p)}>
+      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function ChevronDownIcon({ size = 14, ...p }: P) {
+  return (
+    <svg {...base(size, p)}>
+      <polyline points="6 9 12 15 18 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 /** Severity icon selector */
 export function SevIcon({ severity, size = 14 }: { severity: string; size?: number }) {
   const p = { size };

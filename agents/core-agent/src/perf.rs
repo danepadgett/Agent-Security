@@ -186,7 +186,7 @@ impl PerfTracker {
         }
 
         println!("\n╔═══════════════════════════════════════════════════╗");
-        println!("║        Agent Security — Performance Report         ║");
+        println!("║            Hound — Performance Report               ║");
         println!("╚═══════════════════════════════════════════════════╝\n");
 
         let content = std::fs::read_to_string(path).unwrap_or_default();

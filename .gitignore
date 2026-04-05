@@ -1,12 +1,47 @@
-# Rust
-target/
-Cargo.lock
+# ── Rust build artifacts ──────────────────────────────────────────────────────
+**/target/
 
-# macOS
+# ── Node / frontend ───────────────────────────────────────────────────────────
+node_modules/
+dist/
+apps/desktop/dist/
+
+# ── Runtime data (never commit telemetry, logs, or quarantine) ────────────────
+# Root-level runtime (used when running agent from project root)
+runtime/logs/
+runtime/incidents/
+runtime/quarantine/
+runtime/.integrity
+runtime/baseline.db
+runtime/unacknowledged-incidents.json
+runtime/acknowledged-incidents.json
+runtime/ack-v2.json
+runtime/dark-web-monitor.json
+runtime/storylines.json
+
+# Agent-local runtime (used by cargo run inside agents/core-agent/)
+agents/core-agent/runtime/logs/
+agents/core-agent/runtime/incidents/
+agents/core-agent/runtime/quarantine/
+agents/core-agent/runtime/.integrity
+agents/core-agent/runtime/baseline.db
+agents/core-agent/runtime/unacknowledged-incidents.json
+agents/core-agent/runtime/acknowledged-incidents.json
+
+# ── Secrets and environment ───────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ── macOS ─────────────────────────────────────────────────────────────────────
 .DS_Store
+**/.DS_Store
 
-# Runtime
-runtime/logs/*.jsonl
-
-# Editors
+# ── Editors ───────────────────────────────────────────────────────────────────
 .vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Installer build output ────────────────────────────────────────────────────
+dist/

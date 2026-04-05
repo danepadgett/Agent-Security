@@ -1,0 +1,1269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hound — Behavioral endpoint security for macOS</title>
+<meta name="description" content="Hound watches how programs behave on your Mac and stops attacks before they cause damage. Free, local-first, no account required.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 52 52'><path d='M26 4L7 14v11c0 11.4 8.15 22.07 19.56 24.67C37.85 47.07 45 36.4 45 25V14L26 4z' fill='rgba(255,255,255,0.10)' stroke='%23ffffff' stroke-width='2.5' stroke-linejoin='round'/><path d='M19 26l5 5 9-9' stroke='%23ffffff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<style>
+  :root {
+    --bg: #0f1117;
+    --bg2: #13151f;
+    --bg3: #1a1d27;
+    --bg-deep: #0d0f14;
+    --border: rgba(255,255,255,0.08);
+    --border-md: rgba(255,255,255,0.12);
+    --text: #ffffff;
+    --muted: #8b949e;
+    --faint: #4b5563;
+    --red: #ef4444;
+    --red-dim: rgba(239,68,68,0.10);
+    --amber: #f59e0b;
+    --amber-dim: rgba(245,158,11,0.10);
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; text-decoration: none; }
+
+  /* PROGRESS BAR */
+  #progress {
+    position: fixed;
+    top: 0; left: 0;
+    height: 2px;
+    width: 0%;
+    background: #fff;
+    z-index: 200;
+    transition: width 0.1s linear;
+  }
+
+  /* NAV */
+  nav {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 56px;
+    background: rgba(15,17,23,0.90);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    z-index: 100;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    padding: 0 24px;
+    transition: background 0.2s;
+  }
+  nav.scrolled { background: rgba(15,17,23,0.97); }
+  .nav-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    text-decoration: none;
+  }
+  .nav-links {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+  }
+  .nav-links a {
+    font-size: 14px;
+    color: var(--muted);
+    transition: color 0.15s;
+    text-decoration: none;
+  }
+  .nav-links a:hover { color: #fff; }
+  .nav-right {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+  }
+  .btn-nav {
+    background: #fff;
+    color: #0f1117;
+    height: 36px;
+    padding: 0 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    transition: opacity 0.15s;
+    text-decoration: none;
+  }
+  .btn-nav:hover { opacity: 0.9; }
+  .hamburger {
+    display: none;
+    flex-direction: column;
+    gap: 5px;
+    cursor: pointer;
+    padding: 4px;
+    background: none;
+    border: none;
+  }
+  .hamburger span { display: block; width: 22px; height: 2px; background: #fff; border-radius: 2px; }
+  #nav-menu {
+    display: none;
+    position: fixed;
+    top: 56px; left: 0; right: 0;
+    background: rgba(15,17,23,0.98);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px;
+    flex-direction: column;
+    gap: 16px;
+    z-index: 99;
+  }
+  #nav-menu.open { display: flex; }
+  #nav-menu a { font-size: 15px; color: var(--muted); padding: 4px 0; text-decoration: none; }
+  #nav-menu a:hover { color: #fff; }
+  @media (max-width: 768px) {
+    .nav-links { display: none; }
+    .btn-nav { display: none; }
+    .hamburger { display: flex; }
+    nav { grid-template-columns: 1fr auto; }
+  }
+
+  /* CONTAINER */
+  .container { max-width: 1100px; margin: 0 auto; padding: 0 32px; }
+
+  /* REVEAL */
+  .reveal {
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.5s ease, transform 0.5s ease;
+  }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+
+  /* EYEBROW */
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 16px;
+  }
+
+  /* SECTION */
+  section { padding: 96px 0; }
+  .section-title {
+    font-size: 42px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    margin-bottom: 20px;
+  }
+  .section-sub {
+    font-size: 18px;
+    color: var(--muted);
+    line-height: 1.65;
+    margin-bottom: 48px;
+    max-width: 600px;
+  }
+
+  /* HERO */
+  .hero {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    padding-top: 56px;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 64px;
+    align-items: center;
+    width: 100%;
+  }
+  .hero-left { padding: 48px 0; }
+  .badge-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--border-md);
+    border-radius: 100px;
+    padding: 5px 14px;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 28px;
+  }
+  .badge-pill .dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--muted);
+  }
+  .hero-left h1 {
+    font-size: 54px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.08;
+    margin-bottom: 24px;
+    color: #fff;
+  }
+  .hero-left p {
+    font-size: 18px;
+    color: var(--muted);
+    max-width: 460px;
+    line-height: 1.65;
+    margin-bottom: 36px;
+  }
+  .hero-buttons {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+  .hero-fine { font-size: 12px; color: var(--faint); }
+  .hero-right {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .pipeline-svg-wrap {
+    width: 100%;
+    max-width: 520px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+    position: relative;
+    overflow: hidden;
+  }
+  .pipeline-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin-bottom: 20px;
+  }
+  @media (max-width: 900px) {
+    .hero-split { grid-template-columns: 1fr; gap: 40px; }
+    .hero-right { display: none; }
+    .hero-left h1 { font-size: 38px; }
+    .hero-left p { font-size: 16px; }
+  }
+
+  /* BUTTONS */
+  .btn-primary {
+    background: #fff;
+    color: #0f1117;
+    height: 48px;
+    padding: 0 24px;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 700;
+    border: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: opacity 0.15s;
+    text-decoration: none;
+  }
+  .btn-primary:hover { opacity: 0.9; }
+  .btn-ghost {
+    background: transparent;
+    color: var(--muted);
+    height: 48px;
+    padding: 0 24px;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 600;
+    border: 1px solid var(--border-md);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    transition: color 0.15s, border-color 0.15s;
+    text-decoration: none;
+  }
+  .btn-ghost:hover { color: #fff; border-color: rgba(255,255,255,0.25); }
+  .cta-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 48px;
+    justify-content: center;
+  }
+
+  /* SENSOR SECTION */
+  .bg2 { background: var(--bg2); }
+  .bg-deep { background: var(--bg-deep); }
+  .sensor-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+    margin-top: 48px;
+  }
+  @media (max-width: 768px) { .sensor-grid { grid-template-columns: 1fr; } }
+  .sensor-card {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px;
+    transition: border-color 0.2s;
+  }
+  .sensor-card:hover { border-color: rgba(255,255,255,0.16); }
+  .sensor-card-icon {
+    width: 36px; height: 36px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 16px;
+  }
+  .sensor-card h3 { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 10px; }
+  .sensor-card p { font-size: 13px; color: var(--muted); line-height: 1.65; }
+  .sensor-perf {
+    margin-top: 14px;
+    font-family: monospace;
+    font-size: 11px;
+    color: var(--faint);
+  }
+  .sensor-watches {
+    margin-top: 14px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  .watch-tag {
+    font-size: 10px;
+    font-family: monospace;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    color: var(--faint);
+  }
+
+  /* TERMINAL DEMO */
+  .terminal-wrap {
+    background: var(--bg-deep);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    margin-top: 48px;
+    max-width: 760px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .terminal-bar {
+    background: var(--bg3);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .terminal-dots { display: flex; gap: 6px; }
+  .terminal-dot { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,0.08); }
+  .terminal-title { font-size: 11px; color: var(--faint); font-family: monospace; flex: 1; text-align: center; }
+  .terminal-body {
+    padding: 20px 24px;
+    font-family: monospace;
+    font-size: 12px;
+    line-height: 2;
+    min-height: 200px;
+    color: var(--muted);
+  }
+  .terminal-line { display: block; }
+  .terminal-line .ts { color: var(--faint); user-select: none; }
+  .terminal-line .ev { color: var(--muted); }
+  .terminal-line .path { color: rgba(255,255,255,0.5); }
+  .terminal-line.alert-line .ev { color: var(--amber); }
+  .terminal-line.block-line .ev { color: #fff; font-weight: 700; }
+  .terminal-line.block-line .score { color: var(--red); }
+  .terminal-cursor {
+    display: inline-block;
+    width: 7px; height: 14px;
+    background: rgba(255,255,255,0.5);
+    vertical-align: text-bottom;
+    animation: blink 1s step-end infinite;
+  }
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+  /* STORYLINE SECTION */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 72px;
+    align-items: center;
+  }
+  @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; gap: 40px; } }
+  .storyline-card {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-left: 3px solid #fff;
+    border-radius: 14px;
+    padding: 24px;
+  }
+  .storyline-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+  .badge-amber {
+    background: var(--amber-dim);
+    color: var(--amber);
+    border: 1px solid rgba(245,158,11,0.3);
+    border-radius: 6px;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .badge-red {
+    background: var(--red-dim);
+    color: var(--red);
+    border: 1px solid rgba(239,68,68,0.3);
+    border-radius: 6px;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .badge-time { margin-left: auto; font-size: 12px; color: var(--muted); }
+  .storyline-card h4 { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 16px; }
+  .storyline-divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+  .storyline-block { margin-bottom: 14px; }
+  .storyline-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin-bottom: 4px;
+  }
+  .storyline-block p { font-size: 13px; color: var(--muted); line-height: 1.6; }
+  .mitre-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
+  .mitre-tag {
+    font-size: 10px;
+    font-family: monospace;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 7px;
+    color: var(--faint);
+  }
+
+  /* TIMELINE */
+  .incident-timeline {
+    margin-top: 16px;
+    position: relative;
+  }
+  .timeline-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding-bottom: 14px;
+    position: relative;
+    opacity: 0;
+    animation: fadeUp 0.4s ease forwards;
+  }
+  .timeline-item:nth-child(1) { animation-delay: 0.3s; }
+  .timeline-item:nth-child(2) { animation-delay: 0.7s; }
+  .timeline-item:nth-child(3) { animation-delay: 1.1s; }
+  .timeline-item:nth-child(4) { animation-delay: 1.5s; }
+  .timeline-item:nth-child(5) { animation-delay: 1.9s; }
+  .timeline-item:nth-child(6) { animation-delay: 2.3s; }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .timeline-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--faint);
+    flex-shrink: 0;
+    margin-top: 5px;
+    position: relative;
+    z-index: 1;
+  }
+  .timeline-item.threat .timeline-dot { background: var(--red); }
+  .timeline-item.blocked .timeline-dot { background: #fff; }
+  .timeline-item:not(:last-child) .timeline-dot::after {
+    content: '';
+    position: absolute;
+    left: 3px; top: 8px;
+    width: 1px; height: calc(100% + 6px);
+    background: var(--border);
+  }
+  .timeline-text { font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .timeline-text .ts { color: var(--faint); font-family: monospace; font-size: 11px; margin-right: 6px; }
+  .timeline-item.threat .timeline-text { color: var(--amber); }
+  .timeline-item.blocked .timeline-text { color: #fff; font-weight: 600; }
+
+  /* COMPARISON */
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-top: 48px;
+  }
+  @media (max-width: 900px) { .comparison-grid { grid-template-columns: 1fr; } }
+  .comparison-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px;
+    transition: border-color 0.2s;
+  }
+  .comparison-card:hover { border-color: rgba(255,255,255,0.16); }
+  .comparison-card .label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin-bottom: 12px;
+  }
+  .comparison-card h3 { font-size: 17px; font-weight: 700; color: #fff; margin-bottom: 10px; line-height: 1.3; }
+  .comparison-card p { font-size: 14px; color: var(--muted); line-height: 1.65; }
+
+  /* STEPS */
+  .steps-list {
+    max-width: 640px;
+    margin: 56px auto 0;
+    position: relative;
+  }
+  .step {
+    display: flex;
+    gap: 24px;
+    padding-bottom: 40px;
+    position: relative;
+  }
+  .step:last-child { padding-bottom: 0; }
+  .step:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    left: 24px; top: 52px;
+    bottom: 0; width: 1px;
+    background: var(--border);
+  }
+  .step-num {
+    font-size: 48px;
+    font-weight: 800;
+    color: #fff;
+    opacity: 0.12;
+    line-height: 1;
+    min-width: 50px;
+    text-align: center;
+    flex-shrink: 0;
+    padding-top: 2px;
+  }
+  .step-content h3 { font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 8px; margin-top: 6px; }
+  .step-content p { font-size: 15px; color: var(--muted); line-height: 1.65; }
+  .step-meta { font-family: monospace; font-size: 12px; color: var(--faint); margin-top: 10px; }
+
+  /* TRUST */
+  .trust-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+    margin-top: 48px;
+  }
+  @media (max-width: 768px) { .trust-grid { grid-template-columns: 1fr; } }
+  .trust-card {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px;
+  }
+  .trust-card h3 { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 10px; }
+  .trust-card p { font-size: 14px; color: var(--muted); line-height: 1.65; }
+
+  /* FAQ */
+  .faq-list { max-width: 680px; margin: 48px auto 0; }
+  .faq-item { border-bottom: 1px solid var(--border); }
+  .faq-q {
+    width: 100%;
+    background: none;
+    border: none;
+    text-align: left;
+    padding: 20px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .faq-q:hover { color: #fff; }
+  .faq-indicator {
+    font-size: 18px;
+    color: var(--faint);
+    transition: transform 0.2s;
+    flex-shrink: 0;
+  }
+  .faq-item.open .faq-indicator { transform: rotate(45deg); }
+  .faq-a {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+  }
+  .faq-item.open .faq-a { max-height: 300px; }
+  .faq-a p {
+    font-size: 15px;
+    color: var(--muted);
+    line-height: 1.7;
+    padding-bottom: 20px;
+  }
+
+  /* FOOTER */
+  footer {
+    background: var(--bg2);
+    border-top: 1px solid var(--border);
+    padding: 40px 32px 24px;
+  }
+  .footer-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 32px;
+    max-width: 1100px;
+    margin: 0 auto 32px;
+  }
+  .footer-brand { display: flex; flex-direction: column; gap: 8px; }
+  .footer-brand-row { display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 700; }
+  .footer-brand-tag { font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .footer-nav { display: flex; flex-direction: column; gap: 10px; }
+  .footer-nav a { font-size: 13px; color: var(--muted); transition: color 0.15s; }
+  .footer-nav a:hover { color: #fff; }
+  .footer-tech { font-size: 13px; color: var(--muted); text-align: right; line-height: 1.6; }
+  .footer-bottom {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    justify-content: space-between;
+  }
+  .footer-bottom span { font-size: 11px; color: var(--faint); }
+  @media (max-width: 768px) {
+    .footer-grid { grid-template-columns: 1fr; text-align: center; }
+    .footer-brand { align-items: center; }
+    .footer-brand-row { justify-content: center; }
+    .footer-nav { align-items: center; }
+    .footer-tech { text-align: center; }
+    .footer-bottom { justify-content: center; }
+  }
+</style>
+</head>
+<body>
+
+<div id="progress" role="progressbar" aria-hidden="true"></div>
+
+<!-- NAV -->
+<nav id="main-nav">
+  <a href="./index.html" class="nav-brand">
+    <svg width="20" height="20" viewBox="0 0 52 52" fill="none" aria-hidden="true">
+      <path d="M26 4L7 14v11c0 11.4 8.15 22.07 19.56 24.67C37.85 47.07 45 36.4 45 25V14L26 4z" fill="rgba(255,255,255,0.10)" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"/>
+      <path d="M19 26l5 5 9-9" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    Hound
+  </a>
+  <div class="nav-links">
+    <a href="./how-it-works.html">How it works</a>
+    <a href="./detection.html">Detection</a>
+    <a href="./download.html">Download</a>
+  </div>
+  <div class="nav-right">
+    <a href="./download.html" class="btn-nav">Download</a>
+    <button class="hamburger" id="nav-toggle" aria-label="Open menu">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+</nav>
+<div id="nav-menu" aria-label="Mobile navigation">
+  <a href="./how-it-works.html">How it works</a>
+  <a href="./detection.html">Detection</a>
+  <a href="./download.html">Download</a>
+</div>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="container">
+    <div class="hero-split">
+      <div class="hero-left">
+        <div class="badge-pill">
+          <span class="dot"></span>
+          Free &middot; Local-first &middot; Privacy-first
+        </div>
+        <h1>Your Mac is more exposed than you think.</h1>
+        <p>Hound watches how programs behave on your Mac and stops attacks before they cause damage. No signatures. No cloud dependency. No subscription.</p>
+        <div class="hero-buttons">
+          <a href="./download.html" class="btn-primary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 3v13M6 11l6 6 6-6" stroke="#0f1117" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M4 20h16" stroke="#0f1117" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            Download for macOS
+          </a>
+          <a href="./how-it-works.html" class="btn-ghost">How it works</a>
+        </div>
+        <p class="hero-fine">macOS 12 Monterey or later &middot; Apple Silicon + Intel</p>
+      </div>
+      <div class="hero-right">
+        <div class="pipeline-svg-wrap">
+          <div class="pipeline-label">Detection pipeline</div>
+          <svg viewBox="0 0 480 190" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="width:100%;display:block;">
+            <defs>
+              <path id="s1" d="M 132,23 L 154,86"/>
+              <path id="s2" d="M 132,63 L 154,86"/>
+              <path id="s3" d="M 132,103 L 154,86"/>
+              <path id="s4" d="M 132,143 L 154,86"/>
+              <path id="m1" d="M 278,86 L 298,86"/>
+              <path id="m2" d="M 394,86 L 410,86"/>
+            </defs>
+
+            <!-- Sensor connection lines -->
+            <line x1="132" y1="23" x2="154" y2="86" stroke="rgba(255,255,255,0.07)" stroke-width="1"/>
+            <line x1="132" y1="63" x2="154" y2="86" stroke="rgba(255,255,255,0.07)" stroke-width="1"/>
+            <line x1="132" y1="103" x2="154" y2="86" stroke="rgba(255,255,255,0.07)" stroke-width="1"/>
+            <line x1="132" y1="143" x2="154" y2="86" stroke="rgba(255,255,255,0.07)" stroke-width="1"/>
+
+            <!-- Mid lines -->
+            <line x1="278" y1="86" x2="298" y2="86" stroke="rgba(255,255,255,0.09)" stroke-width="1"/>
+            <line x1="394" y1="86" x2="414" y2="86" stroke="rgba(255,255,255,0.09)" stroke-width="1"/>
+
+            <!-- Sensor boxes -->
+            <rect x="0" y="10" width="132" height="26" rx="5" fill="#13151f" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
+            <text x="10" y="27" font-size="10" font-family="monospace" fill="#6b7280">File System</text>
+
+            <rect x="0" y="50" width="132" height="26" rx="5" fill="#13151f" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
+            <text x="10" y="67" font-size="10" font-family="monospace" fill="#6b7280">Process Monitor</text>
+
+            <rect x="0" y="90" width="132" height="26" rx="5" fill="#13151f" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
+            <text x="10" y="107" font-size="10" font-family="monospace" fill="#6b7280">Network</text>
+
+            <rect x="0" y="130" width="132" height="26" rx="5" fill="#13151f" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
+            <text x="10" y="147" font-size="10" font-family="monospace" fill="#6b7280">Persistence</text>
+
+            <!-- Detection Engine -->
+            <rect x="154" y="46" width="124" height="80" rx="8" fill="#1a1d27" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
+            <text x="216" y="80" font-size="11" font-family="-apple-system,sans-serif" font-weight="700" fill="#ffffff" text-anchor="middle">Detection</text>
+            <text x="216" y="96" font-size="11" font-family="-apple-system,sans-serif" font-weight="700" fill="#ffffff" text-anchor="middle">Engine</text>
+            <text x="216" y="114" font-size="9" font-family="monospace" fill="#4b5563" text-anchor="middle">165 tests</text>
+
+            <!-- Incident Correlator -->
+            <rect x="298" y="66" width="96" height="40" rx="6" fill="#13151f" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
+            <text x="346" y="82" font-size="9" font-family="monospace" fill="#6b7280" text-anchor="middle">Incident</text>
+            <text x="346" y="95" font-size="9" font-family="monospace" fill="#6b7280" text-anchor="middle">Correlator</text>
+
+            <!-- Response Engine -->
+            <rect x="414" y="73" width="66" height="26" rx="5" fill="#13151f" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
+            <text x="447" y="90" font-size="9" font-family="monospace" fill="#6b7280" text-anchor="middle">Response</text>
+
+            <!-- Animated dots: sensors -->
+            <circle r="2.5" fill="rgba(255,255,255,0.9)">
+              <animateMotion dur="1.8s" repeatCount="indefinite" begin="0s"><mpath href="#s1"/></animateMotion>
+              <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.15;0.85;1" dur="1.8s" repeatCount="indefinite" begin="0s"/>
+            </circle>
+            <circle r="2.5" fill="rgba(255,255,255,0.9)">
+              <animateMotion dur="1.8s" repeatCount="indefinite" begin="0.45s"><mpath href="#s2"/></animateMotion>
+              <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.15;0.85;1" dur="1.8s" repeatCount="indefinite" begin="0.45s"/>
+            </circle>
+            <circle r="2.5" fill="rgba(255,255,255,0.9)">
+              <animateMotion dur="1.8s" repeatCount="indefinite" begin="0.9s"><mpath href="#s3"/></animateMotion>
+              <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.15;0.85;1" dur="1.8s" repeatCount="indefinite" begin="0.9s"/>
+            </circle>
+            <circle r="2.5" fill="rgba(255,255,255,0.9)">
+              <animateMotion dur="1.8s" repeatCount="indefinite" begin="1.35s"><mpath href="#s4"/></animateMotion>
+              <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.15;0.85;1" dur="1.8s" repeatCount="indefinite" begin="1.35s"/>
+            </circle>
+
+            <!-- Animated dots: pipeline stages -->
+            <circle r="2.5" fill="rgba(255,255,255,0.65)">
+              <animateMotion dur="0.7s" repeatCount="indefinite" begin="0s"><mpath href="#m1"/></animateMotion>
+              <animate attributeName="opacity" values="0;0.8;0" dur="0.7s" repeatCount="indefinite" begin="0s"/>
+            </circle>
+            <circle r="2.5" fill="rgba(255,255,255,0.65)">
+              <animateMotion dur="0.7s" repeatCount="indefinite" begin="0.35s"><mpath href="#m2"/></animateMotion>
+              <animate attributeName="opacity" values="0;0.8;0" dur="0.7s" repeatCount="indefinite" begin="0.35s"/>
+            </circle>
+          </svg>
+          <div style="margin-top:16px; display:flex; gap:16px; flex-wrap:wrap;">
+            <div style="font-size:11px;color:#4b5563;">
+              <span style="font-family:monospace;color:#8b949e;">16 MB</span> memory
+            </div>
+            <div style="font-size:11px;color:#4b5563;">
+              <span style="font-family:monospace;color:#8b949e;">&lt;1%</span> CPU
+            </div>
+            <div style="font-size:11px;color:#4b5563;">
+              <span style="font-family:monospace;color:#8b949e;">~95%</span> MITRE coverage
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- WHAT HOUND WATCHES -->
+<section class="bg2">
+  <div class="container">
+    <p class="eyebrow reveal">Sensor layer</p>
+    <h2 class="section-title reveal">What Hound actually watches.</h2>
+    <p class="section-sub reveal">Four independent sensor subsystems. Each generates atomic signals. The detection engine evaluates those signals against 165 behavioral tests.</p>
+    <div class="sensor-grid">
+      <div class="sensor-card reveal">
+        <div class="sensor-card-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-7-7z" stroke="#8b949e" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M13 2v7h7" stroke="#8b949e" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <h3>File System</h3>
+        <p>Watches 11 directories using macOS FSEvents API (push-based, not polling). Detects file creation, permission changes, quarantine attribute changes, and magic bytes mismatches &mdash; executables disguised as PDFs or images.</p>
+        <div class="sensor-watches">
+          <span class="watch-tag">~/Downloads</span>
+          <span class="watch-tag">~/Desktop</span>
+          <span class="watch-tag">LaunchAgents</span>
+          <span class="watch-tag">~/.ssh</span>
+          <span class="watch-tag">~/.aws</span>
+          <span class="watch-tag">BTM database</span>
+        </div>
+        <div class="sensor-perf">~18 microseconds mean per tick</div>
+      </div>
+      <div class="sensor-card reveal">
+        <div class="sensor-card-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="2" y="3" width="20" height="14" rx="2" stroke="#8b949e" stroke-width="1.5"/>
+            <path d="M8 21h8M12 17v4" stroke="#8b949e" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <h3>Process Monitor</h3>
+        <p>Uses sysinfo kernel API &mdash; no subprocess spawning. Captures PID, parent PID, command, arguments, and executable path. Classifies processes as system, browser, interpreter, user app, or unknown. Flags dangerous parent-child relationships.</p>
+        <div class="sensor-watches">
+          <span class="watch-tag">interpreter abuse</span>
+          <span class="watch-tag">LOLBin execution</span>
+          <span class="watch-tag">masquerading</span>
+          <span class="watch-tag">double extension</span>
+        </div>
+        <div class="sensor-perf">~35 milliseconds mean per tick</div>
+      </div>
+      <div class="sensor-card reveal">
+        <div class="sensor-card-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2z" stroke="#8b949e" stroke-width="1.5"/>
+            <path d="M2 12h20M12 2c-3 4-3 14 0 20M12 2c3 4 3 14 0 20" stroke="#8b949e" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <h3>Network Monitor</h3>
+        <p>Polls active connections via lsof. Tracks per-PID connection history across ticks to detect C2 beaconing patterns: repeated connections to the same external IP at regular intervals. Apple and Google IP ranges suppressed.</p>
+        <div class="sensor-watches">
+          <span class="watch-tag">C2 beaconing</span>
+          <span class="watch-tag">external connections</span>
+          <span class="watch-tag">upload patterns</span>
+          <span class="watch-tag">exfiltration</span>
+        </div>
+        <div class="sensor-perf">~17 milliseconds mean per tick</div>
+      </div>
+      <div class="sensor-card reveal">
+        <div class="sensor-card-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 3L2 8l10 5 10-5-10-5z" stroke="#8b949e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M2 16l10 5 10-5M2 12l10 5 10-5" stroke="#8b949e" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <h3>Persistence Monitor</h3>
+        <p>Watches LaunchAgents and LaunchDaemons via FSEvents. Polls crontab for modifications. Monitors the BTM (Background Task Management) database. Detects login hook installation via com.apple.loginwindow defaults.</p>
+        <div class="sensor-watches">
+          <span class="watch-tag">LaunchAgents</span>
+          <span class="watch-tag">LaunchDaemons</span>
+          <span class="watch-tag">crontab</span>
+          <span class="watch-tag">login hooks</span>
+          <span class="watch-tag">BTM database</span>
+        </div>
+        <div class="sensor-perf">~8 milliseconds mean per tick</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- LIVE INCIDENT DEMO -->
+<section class="bg-deep">
+  <div class="container">
+    <p class="eyebrow reveal" style="text-align:center;">Live detection</p>
+    <h2 class="section-title reveal" style="text-align:center;">Watch it catch an attack in real time.</h2>
+    <p class="section-sub reveal" style="text-align:center;margin-left:auto;margin-right:auto;">A downloaded file disguises itself as a PDF, gets marked executable, spawns a process, and phones home. Hound correlates all of it into a single incident and blocks it.</p>
+    <div class="terminal-wrap reveal">
+      <div class="terminal-bar">
+        <div class="terminal-dots">
+          <div class="terminal-dot"></div>
+          <div class="terminal-dot"></div>
+          <div class="terminal-dot"></div>
+        </div>
+        <div class="terminal-title">agent-events.jsonl &mdash; live</div>
+      </div>
+      <div class="terminal-body" id="terminal-body">
+        <span class="terminal-cursor" id="term-cursor"></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- STORYLINE -->
+<section>
+  <div class="container">
+    <div class="two-col">
+      <div class="reveal">
+        <p class="eyebrow">StoryLine</p>
+        <h2 class="section-title">Plain English. Every incident, explained.</h2>
+        <p style="font-size:17px;color:var(--muted);line-height:1.7;margin-bottom:20px;">Every alert Hound generates comes with a full narrative: what happened, what was targeted, how it was caught, and what was done about it. No logs to parse. No cryptic alert codes.</p>
+        <p style="font-size:17px;color:var(--muted);line-height:1.7;">Every StoryLine maps to the MITRE ATT&amp;CK framework so you always know exactly which attack technique was used. All narratives are stored permanently on your device &mdash; never sent to a server.</p>
+        <div style="margin-top:28px;">
+          <a href="./how-it-works.html" class="btn-ghost">See how it works</a>
+        </div>
+      </div>
+      <div class="storyline-card reveal">
+        <div class="storyline-header">
+          <span class="badge-amber">High Risk</span>
+          <span class="badge-red">Blocked</span>
+          <span class="badge-time">14:23:03</span>
+        </div>
+        <h4>Malicious downloader disguised as invoice PDF</h4>
+        <hr class="storyline-divider">
+        <div class="incident-timeline">
+          <div class="timeline-item">
+            <div class="timeline-dot"></div>
+            <div class="timeline-text"><span class="ts">14:23:01</span>File created in Downloads: invoice_march.pdf.exe</div>
+          </div>
+          <div class="timeline-item threat">
+            <div class="timeline-dot"></div>
+            <div class="timeline-text"><span class="ts">14:23:01</span>Magic bytes mismatch &mdash; executable disguised as PDF</div>
+          </div>
+          <div class="timeline-item threat">
+            <div class="timeline-dot"></div>
+            <div class="timeline-text"><span class="ts">14:23:02</span>File became executable (chmod +x applied)</div>
+          </div>
+          <div class="timeline-item threat">
+            <div class="timeline-dot"></div>
+            <div class="timeline-text"><span class="ts">14:23:02</span>Process spawned from Downloads directory</div>
+          </div>
+          <div class="timeline-item threat">
+            <div class="timeline-dot"></div>
+            <div class="timeline-text"><span class="ts">14:23:03</span>Outbound connection to 45.77.68.91 established</div>
+          </div>
+          <div class="timeline-item blocked">
+            <div class="timeline-dot"></div>
+            <div class="timeline-text"><span class="ts">14:23:03</span>INCIDENT: download_and_execute [score=91] &mdash; Blocked</div>
+          </div>
+        </div>
+        <div class="mitre-tags">
+          <span class="mitre-tag">T1204</span>
+          <span class="mitre-tag">T1059</span>
+          <span class="mitre-tag">T1036</span>
+          <span class="mitre-tag">T1071</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- NOT YOUR TYPICAL AV -->
+<section class="bg2">
+  <div class="container">
+    <p class="eyebrow reveal" style="text-align:center;">Why Hound</p>
+    <h2 class="section-title reveal" style="text-align:center;">Not your typical antivirus.</h2>
+    <p class="section-sub reveal" style="text-align:center;margin-left:auto;margin-right:auto;">Traditional AV fails because it compares files against known-bad lists. Hound fails attackers by watching what programs actually do.</p>
+    <div class="comparison-grid">
+      <div class="comparison-card reveal">
+        <div class="label">Traditional AV</div>
+        <h3>Signature-based detection misses everything novel</h3>
+        <p>Known signatures can only catch threats that have already been seen. Zero-days, fileless attacks, and obfuscated payloads pass right through. By the time the database is updated, the damage is done.</p>
+      </div>
+      <div class="comparison-card reveal">
+        <div class="label">Enterprise EDR</div>
+        <h3>Enterprise tools cost thousands per seat</h3>
+        <p>CrowdStrike and SentinelOne are genuinely excellent. They're also priced for organizations with dedicated security teams. A freelancer or a 10-person company can't access this category.</p>
+      </div>
+      <div class="comparison-card reveal">
+        <div class="label">Hound</div>
+        <h3>Behavioral detection. Free. On your machine.</h3>
+        <p>Hound catches attack patterns regardless of what the malware looks like. curl piped into bash is suspicious. A PDF that becomes an executable is suspicious. Hound understands this. No subscription required.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW TO GET IT -->
+<section>
+  <div class="container" style="text-align:center;">
+    <p class="eyebrow reveal">Getting started</p>
+    <h2 class="section-title reveal">Running in under 5 minutes.</h2>
+    <p class="section-sub reveal" style="margin-left:auto;margin-right:auto;">No account required. No cloud signup. No subscription. Download, install, and it's watching.</p>
+    <div class="steps-list">
+      <div class="step reveal">
+        <div class="step-num">1</div>
+        <div class="step-content">
+          <h3>Download the installer</h3>
+          <p>Download the .dmg, drag Hound to Applications. Double-click to launch.</p>
+        </div>
+      </div>
+      <div class="step reveal">
+        <div class="step-num">2</div>
+        <div class="step-content">
+          <h3>Grant Full Disk Access</h3>
+          <p>Hound needs Full Disk Access to monitor the directories where threats appear. Grant it in System Settings &rarr; Privacy &amp; Security. No other special permissions required.</p>
+        </div>
+      </div>
+      <div class="step reveal">
+        <div class="step-num">3</div>
+        <div class="step-content">
+          <h3>Let it run</h3>
+          <p>Hound starts in Simulation Mode &mdash; it detects and alerts but does not take action. Review the incident feed. When you're confident, flip to Live Mode in Settings.</p>
+          <div class="step-meta">Simulation Mode is the default. You control when it acts.</div>
+        </div>
+      </div>
+    </div>
+    <div class="cta-row">
+      <a href="./download.html" class="btn-primary">Download Hound</a>
+      <a href="./detection.html" class="btn-ghost">See detection coverage</a>
+    </div>
+  </div>
+</section>
+
+<!-- TRUST -->
+<section class="bg-deep">
+  <div class="container">
+    <p class="eyebrow reveal">Privacy &amp; trust</p>
+    <h2 class="section-title reveal">Everything stays on your Mac.</h2>
+    <p class="section-sub reveal">Hound is designed for people who take their privacy seriously. No telemetry. No account. No cloud.</p>
+    <div class="trust-grid">
+      <div class="trust-card reveal">
+        <h3>No data leaves your machine</h3>
+        <p>All detection, correlation, and response happens locally. Your file paths, process names, and incident history never touch a server. The AI explanation feature is optional and only activates when you explicitly ask with an API key you provide.</p>
+      </div>
+      <div class="trust-card reveal">
+        <h3>No account required</h3>
+        <p>Download and run. There is no sign-in, no email capture, no license key. Hound will never lock you out or require renewal.</p>
+      </div>
+      <div class="trust-card reveal">
+        <h3>Simulation Mode by default</h3>
+        <p>Hound defaults to Simulation Mode on install. It detects and alerts but never kills a process or quarantines a file without your explicit opt-in. You review before it acts.</p>
+      </div>
+      <div class="trust-card reveal">
+        <h3>Hard guardrails, always on</h3>
+        <p>Even in Live Mode, Hound will never kill a system process, a browser, or anything in /System. Never quarantine a PDF, image, or document. The guardrail system is load-bearing and cannot be disabled.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section class="bg2">
+  <div class="container">
+    <p class="eyebrow reveal" style="text-align:center;">Questions</p>
+    <h2 class="section-title reveal" style="text-align:center;">Frequently asked.</h2>
+    <div class="faq-list">
+      <div class="faq-item reveal">
+        <button class="faq-q" aria-expanded="false">
+          Does Hound slow down my Mac?
+          <span class="faq-indicator" aria-hidden="true">+</span>
+        </button>
+        <div class="faq-a">
+          <p>No. Hound uses ~16 MB of memory and less than 1% CPU during normal operation. Every subsystem runs within a 50ms budget per tick. For comparison, a single browser tab uses more memory than the entire Hound agent.</p>
+        </div>
+      </div>
+      <div class="faq-item reveal">
+        <button class="faq-q" aria-expanded="false">
+          Does it work without an internet connection?
+          <span class="faq-indicator" aria-hidden="true">+</span>
+        </button>
+        <div class="faq-a">
+          <p>Yes, completely. Detection, correlation, alerting, and response all run locally. There is no cloud backend. The optional AI explanation feature requires an Anthropic API key and an active internet connection, but the core agent works entirely offline.</p>
+        </div>
+      </div>
+      <div class="faq-item reveal">
+        <button class="faq-q" aria-expanded="false">
+          Will Hound generate a lot of false positives?
+          <span class="faq-indicator" aria-hidden="true">+</span>
+        </button>
+        <div class="faq-a">
+          <p>Incidents require a minimum of 35 correlation points to trigger. Single atomic signals rarely reach threshold on their own &mdash; it takes a combination of related suspicious behaviors. The whitelist is pre-configured for common developer tools (cargo, node, python, git) and common apps (Chrome, Xcode, VS Code). You can extend it in Settings.</p>
+        </div>
+      </div>
+      <div class="faq-item reveal">
+        <button class="faq-q" aria-expanded="false">
+          What macOS versions are supported?
+          <span class="faq-indicator" aria-hidden="true">+</span>
+        </button>
+        <div class="faq-a">
+          <p>macOS 12 Monterey or later, on both Apple Silicon (M1, M2, M3, M4) and Intel. Hound is tested on macOS 15 Sequoia.</p>
+        </div>
+      </div>
+      <div class="faq-item reveal">
+        <button class="faq-q" aria-expanded="false">
+          How is this free?
+          <span class="faq-indicator" aria-hidden="true">+</span>
+        </button>
+        <div class="faq-a">
+          <p>Hound is free because its goal is adoption, not revenue. Every Mac running Hound is a Mac that is more protected. Distribution and trust are the objectives. There are no paid tiers, no feature gates, and no plan to add them.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section style="text-align:center; border-top: 1px solid var(--border);">
+  <div class="container">
+    <p class="eyebrow reveal">Get protected</p>
+    <h2 class="section-title reveal">Your Mac deserves better than signature scanning.</h2>
+    <p class="reveal" style="font-size:18px;color:var(--muted);max-width:520px;margin:0 auto 40px;line-height:1.65;">Free, local-first behavioral endpoint protection. No account. No subscription. No compromise.</p>
+    <div class="cta-row reveal">
+      <a href="./download.html" class="btn-primary">Download for macOS &mdash; Free</a>
+      <a href="./detection.html" class="btn-ghost">Full detection coverage</a>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-grid">
+    <div class="footer-brand">
+      <div class="footer-brand-row">
+        <svg width="16" height="16" viewBox="0 0 52 52" fill="none" aria-hidden="true">
+          <path d="M26 4L7 14v11c0 11.4 8.15 22.07 19.56 24.67C37.85 47.07 45 36.4 45 25V14L26 4z" fill="rgba(255,255,255,0.10)" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"/>
+          <path d="M19 26l5 5 9-9" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Hound
+      </div>
+      <p class="footer-brand-tag">Behavioral endpoint security for macOS</p>
+    </div>
+    <nav class="footer-nav" aria-label="Footer navigation">
+      <a href="./how-it-works.html">How it works</a>
+      <a href="./detection.html">Detection coverage</a>
+      <a href="./download.html">Download</a>
+      <a href="#">Privacy</a>
+    </nav>
+    <div class="footer-tech">Built with Rust, Tauri, and React<br>Free &middot; Local-first &middot; Privacy-first</div>
+  </div>
+  <div class="footer-bottom">
+    <span>&copy; 2026 Hound Security</span>
+    <span>Hound is not affiliated with or endorsed by Apple Inc.</span>
+  </div>
+</footer>
+
+<script>
+// Scroll progress bar
+const progress = document.getElementById('progress');
+window.addEventListener('scroll', () => {
+  const h = document.documentElement;
+  const pct = (window.scrollY / (h.scrollHeight - h.clientHeight)) * 100;
+  progress.style.width = pct + '%';
+}, { passive: true });
+
+// Nav darkens on scroll
+const nav = document.getElementById('main-nav');
+window.addEventListener('scroll', () => {
+  nav.classList.toggle('scrolled', window.scrollY > 20);
+}, { passive: true });
+
+// Scroll reveal
+const obs = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) { e.target.classList.add('visible'); obs.unobserve(e.target); }
+  });
+}, { threshold: 0.07 });
+document.querySelectorAll('.reveal').forEach(el => obs.observe(el));
+
+// Mobile nav
+const toggle = document.getElementById('nav-toggle');
+const menu = document.getElementById('nav-menu');
+if (toggle && menu) {
+  toggle.addEventListener('click', () => {
+    const open = menu.classList.toggle('open');
+    toggle.setAttribute('aria-expanded', open);
+  });
+}
+
+// FAQ accordion
+document.querySelectorAll('.faq-q').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const item = btn.closest('.faq-item');
+    const wasOpen = item.classList.contains('open');
+    document.querySelectorAll('.faq-item').forEach(i => {
+      i.classList.remove('open');
+      i.querySelector('.faq-q').setAttribute('aria-expanded', 'false');
+    });
+    if (!wasOpen) {
+      item.classList.add('open');
+      btn.setAttribute('aria-expanded', 'true');
+    }
+  });
+});
+
+// Terminal demo animation
+const termBody = document.getElementById('terminal-body');
+const termCursor = document.getElementById('term-cursor');
+const lines = [
+  { cls: '', ts: '14:23:01', ev: 'file_created', detail: '~/Downloads/invoice_march.pdf.exe' },
+  { cls: 'alert-line', ts: '14:23:01', ev: 'magic_bytes_mismatch', detail: 'MZ header in .pdf file — executable disguised as document' },
+  { cls: 'alert-line', ts: '14:23:02', ev: 'file_became_executable', detail: 'chmod +x applied post-download' },
+  { cls: 'alert-line', ts: '14:23:02', ev: 'process_spawned', detail: 'invoice_march.pdf.exe (pid 38291, parent: zsh)' },
+  { cls: 'alert-line', ts: '14:23:03', ev: 'network_connection', detail: '192.168.1.5:49302 → 45.77.68.91:443' },
+  { cls: 'alert-line', ts: '14:23:03', ev: 'alert_c2_beaconing_pattern', detail: 'score=18, confidence=high' },
+  { cls: 'alert-line', ts: '14:23:03', ev: 'alert_downloaded_file_executed', detail: 'score=24, pid=38291' },
+  { cls: 'block-line', ts: '14:23:03', ev: 'INCIDENT: download_and_execute', detail: '[score=91] → BLOCKED — process killed, file quarantined' },
+];
+
+let lineIdx = 0;
+let started = false;
+
+function appendLine() {
+  if (lineIdx >= lines.length) {
+    // pause then restart
+    setTimeout(() => {
+      termBody.innerHTML = '';
+      termBody.appendChild(termCursor);
+      lineIdx = 0;
+      setTimeout(tick, 1200);
+    }, 4000);
+    return;
+  }
+  const l = lines[lineIdx++];
+  const span = document.createElement('span');
+  span.className = 'terminal-line' + (l.cls ? ' ' + l.cls : '');
+  span.innerHTML = `<span class="ts">[${l.ts}]</span> <span class="ev">${l.ev}</span><span class="path">: ${l.detail}</span>`;
+  termBody.insertBefore(span, termCursor);
+  const delay = lineIdx <= 5 ? 600 : 300;
+  setTimeout(tick, delay);
+}
+
+function tick() { appendLine(); }
+
+// Start when terminal scrolls into view
+const termObs = new IntersectionObserver(entries => {
+  if (entries[0].isIntersecting && !started) {
+    started = true;
+    setTimeout(tick, 800);
+    termObs.disconnect();
+  }
+}, { threshold: 0.3 });
+const termWrap = document.querySelector('.terminal-wrap');
+if (termWrap) termObs.observe(termWrap);
+</script>
+</body>
+</html>

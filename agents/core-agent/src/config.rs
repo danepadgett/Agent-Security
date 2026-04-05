@@ -78,6 +78,97 @@ pub fn read_live_whitelist() -> Whitelist {
     read_whitelist_from_toml(&agent_config_path())
 }
 
+/// Processes/paths in this list never generate any alert events.
+/// Completely separate from the response whitelist (which says "detect but don't act").
+/// This says "don't even generate an alert."
+/// Defaults to empty on any read error — missing section means no suppression.
+#[derive(Debug, Clone, Default)]
+pub struct DetectionWhitelist {
+    /// Process command names (exact match, basename only) that are never alerted on.
+    pub suppressed_process_names: Vec<String>,
+    /// Path prefixes — any process running from these paths is suppressed.
+    pub suppressed_path_prefixes: Vec<String>,
+}
+
+impl DetectionWhitelist {
+    /// Returns true if this process command or path should have detection suppressed.
+    /// `args` is the full argument string for the process (used to suppress shell invocations
+    /// that only reference trusted paths, e.g. zsh -c "source /Users/foo/.claude/...").
+    pub fn is_suppressed(&self, command: &str, path: &str, args: &str) -> bool {
+        // Check command basename
+        let basename = std::path::Path::new(command)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(command);
+        if self.suppressed_process_names.iter().any(|n| n == basename || n == command) {
+            return true;
+        }
+        // Check path prefix
+        if !path.is_empty()
+            && self.suppressed_path_prefixes.iter().any(|prefix| path.starts_with(prefix.as_str()))
+        {
+            return true;
+        }
+        // Shell invoking something under a suppressed path prefix:
+        // e.g. zsh -c "source /Users/foo/.claude/shell-snapshots/..."
+        // We suppress if the shell is a known system shell AND its args reference
+        // at least one suppressed path (and don't reference any untrusted location).
+        if matches!(basename, "zsh" | "bash" | "sh" | "dash" | "ksh") && !args.is_empty() {
+            let args_reference_suppressed = self
+                .suppressed_path_prefixes
+                .iter()
+                .any(|prefix| args.contains(prefix.as_str()));
+            if args_reference_suppressed {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+/// Re-read the [detection_whitelist] section from agent-config.toml on every call.
+/// Returns an empty DetectionWhitelist on any error.
+pub fn read_live_detection_whitelist() -> DetectionWhitelist {
+    let path = agent_config_path();
+    if !path.exists() {
+        return DetectionWhitelist::default();
+    }
+    let contents = match fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return DetectionWhitelist::default(),
+    };
+    let section = extract_toml_section(&contents, "detection_whitelist");
+    DetectionWhitelist {
+        suppressed_process_names: parse_toml_string_array(&section, "suppressed_process_names"),
+        suppressed_path_prefixes: parse_toml_string_array(&section, "suppressed_path_prefixes"),
+    }
+}
+
+/// Re-read the incident score threshold from agent-config.toml on every call.
+/// Falls back to 35 if the key is absent or file is unreadable.
+/// 35 is more conservative than the old 20 — significantly reduces false positives
+/// from individual LOLBin signals firing in quick succession during normal builds.
+pub fn read_live_incident_threshold() -> u8 {
+    let path = agent_config_path();
+    if !path.exists() {
+        return 35;
+    }
+    let contents = match fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return 35,
+    };
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("incident_threshold") {
+            let val = rest.trim().trim_start_matches('=').trim();
+            if let Ok(n) = val.parse::<u8>() {
+                return n;
+            }
+        }
+    }
+    35
+}
+
 pub fn load_policy() -> Result<ResponsePolicy> {
     let path = Path::new(POLICY_PATH);
 
@@ -171,31 +262,35 @@ fn read_whitelist_from_toml(path: &Path) -> Whitelist {
         Ok(c) => c,
         Err(_) => return Whitelist::default(),
     };
-
-    // Collect only the lines that belong to the [whitelist] section.
-    let mut in_whitelist = false;
-    let mut section_lines: Vec<&str> = Vec::new();
-    for line in contents.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('[') {
-            if trimmed == "[whitelist]" {
-                in_whitelist = true;
-                continue;
-            } else if in_whitelist {
-                break; // start of the next section
-            }
-        }
-        if in_whitelist {
-            section_lines.push(line);
-        }
-    }
-
-    let section = section_lines.join("\n");
+    let section = extract_toml_section(&contents, "whitelist");
     Whitelist {
         trusted_process_paths: parse_toml_string_array(&section, "trusted_process_paths"),
         trusted_process_names: parse_toml_string_array(&section, "trusted_process_names"),
         trusted_app_bundle_paths: parse_toml_string_array(&section, "trusted_app_bundle_paths"),
     }
+}
+
+/// Extract the body of a named TOML section (e.g. "whitelist" → reads `[whitelist]` block).
+/// Returns an empty string if the section is not found.
+fn extract_toml_section(contents: &str, section_name: &str) -> String {
+    let header = format!("[{section_name}]");
+    let mut in_section = false;
+    let mut lines: Vec<&str> = Vec::new();
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            if trimmed == header {
+                in_section = true;
+                continue;
+            } else if in_section {
+                break;
+            }
+        }
+        if in_section {
+            lines.push(line);
+        }
+    }
+    lines.join("\n")
 }
 
 /// Extract a TOML string-array value (e.g. `key = ["a", "b"]`) from a section body.

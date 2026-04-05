@@ -31,8 +31,23 @@ export function TopBar({ agentStatus, threatLevel }: Props) {
     <header className="topbar">
       <div className="topbar-left">
         <div className="topbar-logo">
-          <span className="topbar-shield">⬡</span>
-          <span className="topbar-title">Agent Security</span>
+          <svg className="topbar-shield-svg" width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <path
+              d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.35C17.25 22.15 21 17.25 21 12V7L12 2z"
+              fill="rgba(16,185,129,0.2)"
+              stroke="#10b981"
+              strokeWidth="1.5"
+              strokeLinejoin="round"
+            />
+            <path
+              d="M9 12l2 2 4-4"
+              stroke="#10b981"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <span className="topbar-title">Hound</span>
         </div>
       </div>
 

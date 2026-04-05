@@ -1,0 +1,99 @@
+simulation_mode = false
+
+[policy]
+# Minimum incident score to emit an alert_behavioral_incident event.
+# Raised from 20 → 35 to cut false positives from individual LOLBin signals
+# firing during normal development builds. Real multi-signal attack chains
+# score well above 35. Single LOLBin executions score 20 and are now filtered.
+incident_threshold = 35
+
+[detection_whitelist]
+# Processes that generate ZERO alerts regardless of behavior.
+# This is separate from the response whitelist — that says "detect but don't act."
+# This says "don't even generate an alert."
+suppressed_process_names = [
+    "cargo",
+    "rustc",
+    "rust-analyzer",
+    "cargo-watch",
+    "node",
+    "npm",
+    "npx",
+    "vite",
+    "esbuild",
+    "tsc",
+    "tauri",
+    "webpack",
+    "rollup",
+    "git",
+    "gh",
+    "python3",
+    "pip3",
+    "brew",
+    "make",
+    "cmake",
+    "claude",
+    "ZoomUpdater",
+    "rsync",
+    "crontab",
+    "periodic",
+    "atrun",
+    "launchctl",
+    "mdutil",
+    "mdfind",
+    "mdworker_shared",
+    "mdworker",
+    "mds",
+    "mds_stores"
+]
+
+# Path prefixes — any process running from these paths generates no alerts.
+suppressed_path_prefixes = [
+    "/Users/danepadgett/Projects/Hound/",
+    "/Users/danepadgett/.cargo/",
+    "/Users/danepadgett/.rustup/",
+    "/Users/danepadgett/.npm/",
+    "/Users/danepadgett/.claude/",
+    "/usr/local/bin/",
+    "/usr/bin/crontab",
+    "/opt/homebrew/",
+    "/Library/Developer/CommandLineTools/",
+    "/Applications/zoom.us.app/"
+]
+
+[whitelist]
+trusted_process_paths = [
+    "/Users/danepadgett/.rustup/",
+    "/Users/danepadgett/.cargo/",
+    "/Users/danepadgett/.claude/",
+    "/Applications/",
+    "/usr/bin/",
+    "/usr/libexec/",
+    "/usr/sbin/",
+    "/System/"
+]
+trusted_process_names = [
+    "cargo",
+    "rustc",
+    "rust-analyzer",
+    "node",
+    "npm",
+    "npx",
+    "tsc",
+    "vite",
+    "git",
+    "gh",
+    "claude",
+    "zsh",
+    "bash",
+    "sh",
+    "python3",
+    "brew",
+    "make",
+    "crontab"
+]
+trusted_app_bundle_paths = []
+max_log_size_mb = 50
+first_run_complete = true
+[agent]
+id = "b9a62933-fdc4-4d6a-b91f-09fa3703f395"

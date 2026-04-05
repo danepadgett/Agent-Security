@@ -31,6 +31,28 @@ export type AgentStatus = {
   simulation_mode: boolean;
 };
 
-export type AppView = "incidents" | "health" | "settings";
+export type AppView = "incidents" | "health" | "settings" | "history" | "dark-web";
 
 export type AiExplainState = "idle" | "loading" | "done" | "error";
+
+export type StoryLine = {
+  incident_id: string;
+  timestamp: string;
+  headline: string;
+  what_happened: string;
+  what_was_targeted: string;
+  how_it_was_caught: string;
+  what_we_did: string;
+  risk_level: string;
+  mitre_summary: string;
+  verdict: string;
+  ai_enhanced: boolean;
+};
+
+export type AcknowledgedRecord = {
+  id: string;
+  resolved_reason: string;
+  resolved_at: string;
+};
+
+export type FeedTab = "inbox" | "resolved" | "all";

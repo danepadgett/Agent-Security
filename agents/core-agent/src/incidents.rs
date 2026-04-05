@@ -34,6 +34,7 @@ struct IncidentAccumulator {
 pub fn aggregate_incidents(
     detections: &[TelemetryEvent],
     now: DateTime<Utc>,
+    min_score: u8,
 ) -> Vec<TelemetryEvent> {
     let mut groups: HashMap<String, IncidentAccumulator> = HashMap::new();
 
@@ -126,7 +127,7 @@ pub fn aggregate_incidents(
     let mut incidents = Vec::new();
 
     for (_, acc) in groups {
-        if let Some(event) = build_incident(acc, now) {
+        if let Some(event) = build_incident(acc, now, min_score) {
             incidents.push(event);
         }
     }
@@ -134,7 +135,7 @@ pub fn aggregate_incidents(
     incidents
 }
 
-fn build_incident(acc: IncidentAccumulator, now: DateTime<Utc>) -> Option<TelemetryEvent> {
+fn build_incident(acc: IncidentAccumulator, now: DateTime<Utc>, min_score: u8) -> Option<TelemetryEvent> {
     let has_download_exec = acc.signal_set.contains("alert_downloaded_file_executed");
     let has_interpreter_downloads = acc
         .signal_set
@@ -247,6 +248,7 @@ fn build_incident(acc: IncidentAccumulator, now: DateTime<Utc>) -> Option<Teleme
         acc.attack_chain_length,
         event_span_seconds,
         max_pid_signal_count,
+        min_score,
     )?;
 
     let related_paths: Vec<String> = acc.related_paths.iter().cloned().collect();
@@ -338,6 +340,8 @@ fn score_incident(
     event_span_seconds: u64,
     // How many signals does the single most-active PID drive in this incident?
     max_pid_signal_count: usize,
+    // Minimum total score required to emit an incident (live-read from config).
+    min_score: u8,
 ) -> Option<IncidentScoreBreakdown> {
     let mut components = Vec::new();
 
@@ -682,7 +686,7 @@ fn score_incident(
     }
 
     let raw_score: u16 = components.iter().map(|c| c.points as u16).sum();
-    if raw_score < 20 {
+    if raw_score < min_score as u16 {
         return None;
     }
 
@@ -1452,7 +1456,7 @@ mod tests {
         let d2 = make_detection_with_chain_root("alert_keychain_access_attempt", 501, 500, "T1555.001");
         let d3 = make_detection_with_chain_root("alert_command_injection_pattern", 501, 500, "T1059.006");
 
-        let incidents = aggregate_incidents(&[d1, d2, d3], now);
+        let incidents = aggregate_incidents(&[d1, d2, d3], now, 20);
         assert!(!incidents.is_empty(), "should produce at least one incident");
 
         let incident = &incidents[0];
@@ -1497,6 +1501,7 @@ mod tests {
             1,  // attack_chain_length
             15, // event_span_seconds (within 30s window)
             1,  // max_pid_signal_count
+            20, // min_score
         );
         assert!(result.is_some(), "should score above threshold");
         let breakdown = result.unwrap();
@@ -1517,6 +1522,7 @@ mod tests {
             2, 1,
             61, // event_span_seconds (outside 30s window)
             1,
+            20,
         );
         if let Some(breakdown) = result {
             assert!(
@@ -1537,6 +1543,7 @@ mod tests {
             2, 1,
             u64::MAX, // no time window bonus
             3, // max_pid_signal_count = 3
+            20,
         );
         assert!(result.is_some(), "should score above threshold");
         let breakdown = result.unwrap();
@@ -1557,6 +1564,7 @@ mod tests {
             2, 1,
             u64::MAX,
             2, // only 2 signals from same pid — not enough
+            20,
         );
         if let Some(breakdown) = result {
             assert!(
@@ -1579,6 +1587,7 @@ mod tests {
             false, false, false, false, false,
             false, false, false, false, false, false,
             1, 1, u64::MAX, 1,
+            20,
         );
         // 30pts alone exceeds the 20pt threshold
         assert!(result.is_some(), "ransomware alone (30pts) exceeds 20pt threshold");
@@ -1595,6 +1604,7 @@ mod tests {
             false, false, false, false, false,
             false, false, false, false, false, false,
             2, 1, u64::MAX, 1,
+            20,
         );
         assert!(result.is_some(), "curl_pipe_bash(22) + command_injection(20) = 42 >= 40 threshold");
     }
@@ -1624,6 +1634,7 @@ mod tests {
             exfiltration,
             false, false, false, false, false, false, // new tranche 3
             signal_count, 1, u64::MAX, 1,
+            20,
         )
     }
 
@@ -1650,6 +1661,7 @@ mod tests {
             false, false,
             false, false, false, false, false, false, // new tranche 3
             3, 1, u64::MAX, 1,
+            20,
         );
         assert!(result.is_some(), "ssh_lateral + keychain_access + multi_signal should reach threshold");
         let breakdown = result.unwrap();

@@ -1,4 +1,4 @@
-/// Agent Security — watchdog process.
+/// Hound — watchdog process.
 ///
 /// Monitors the core-agent process and restarts it if it exits unexpectedly.
 ///

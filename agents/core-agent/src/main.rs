@@ -25,7 +25,10 @@ mod state;
 use anyhow::Result;
 use baseline::BaselineProfile;
 use chrono::Utc;
-use config::{agent_config_path, load_policy, read_live_simulation_mode, read_live_whitelist};
+use config::{
+    agent_config_path, load_policy, read_live_detection_whitelist, read_live_incident_threshold,
+    read_live_simulation_mode, read_live_whitelist,
+};
 use detections::{evaluate_detections, DetectionContext};
 use evidence::write_incident_evidence_pack;
 use execution_graph::ExecutionGraphCache;
@@ -43,6 +46,7 @@ use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::thread;
 use std::time::Duration;
+use sysinfo::System;
 
 const ALERT_EMIT_COOLDOWN_SECONDS: i64 = 60;
 const INCIDENT_EMIT_COOLDOWN_SECONDS: i64 = 120;
@@ -137,7 +141,8 @@ fn main() -> Result<()> {
     }
 
     let mut file_monitor = FileMonitor::new(&watch_dirs)?;
-    let mut known_processes = processes::snapshot_processes()?;
+    let mut proc_sys = System::new();
+    let mut known_processes = processes::snapshot_processes(&mut proc_sys)?;
     let mut recent_file_events: VecDeque<FileEventRecord> = VecDeque::new();
     // Rolling 60-second window of atomic detection events fed to the correlation engine.
     // Detections from different ticks must be co-visible for cross-tick correlation to work
@@ -176,7 +181,7 @@ fn main() -> Result<()> {
         // ── Process monitor ────────────────────────────────────────────────────
         let t_proc = std::time::Instant::now();
         let (new_process_snapshot, process_events) =
-            processes::collect_new_process_events(&known_processes, now)?;
+            processes::collect_new_process_events(&mut proc_sys, &known_processes, now)?;
         known_processes = new_process_snapshot;
 
         for event in &process_events {
@@ -244,9 +249,35 @@ fn main() -> Result<()> {
                 now,
             };
 
+            // Re-read detection whitelist live on each tick so config changes take effect
+            // without an agent restart.
+            let detection_whitelist = read_live_detection_whitelist();
+
             let t_detect = std::time::Instant::now();
             let detection_events = evaluate_detections(&detection_context);
             for detection in &detection_events {
+                // Detection-level suppression: processes in the detection whitelist never
+                // generate alert events. This is separate from the response whitelist (which
+                // says "detect but don't act") — this says "don't even generate an alert."
+                // All detection events store process info under payload.details.command
+                // (most event types) or payload.details.interpreter (alert_interpreter_abuse).
+                // Use the command value as both the name (for basename matching) and the
+                // path (for prefix matching) — full-path commands like
+                // /Users/foo/.rustup/.../cargo match both by basename and by prefix.
+                let details = detection.payload.get("details");
+                let cmd = details
+                    .and_then(|d| d.get("command").or_else(|| d.get("interpreter")))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let path = cmd; // command IS the path when it's an absolute path
+                let args = details
+                    .and_then(|d| d.get("args"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if detection_whitelist.is_suppressed(cmd, path, args) {
+                    continue; // skip — no log, no incident contribution
+                }
+
                 if should_emit_alert(
                     detection,
                     &mut alert_last_seen,
@@ -258,21 +289,50 @@ fn main() -> Result<()> {
             }
             perf.record_raw("detection_eval", t_detect.elapsed());
 
-            // Accumulate detections into the 60-second rolling window, then pass
-            // the full window to aggregate_incidents so cross-tick signals can correlate.
+            // Accumulate only non-suppressed detections into the rolling window.
             for det in &detection_events {
-                recent_detections.push_back(det.clone());
+                let det_details = det.payload.get("details");
+                let cmd = det_details
+                    .and_then(|d| d.get("command").or_else(|| d.get("interpreter")))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let path = cmd;
+                let args = det_details
+                    .and_then(|d| d.get("args"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if !detection_whitelist.is_suppressed(cmd, path, args) {
+                    recent_detections.push_back(det.clone());
+                }
             }
             trim_recent_detections(&mut recent_detections, 60, now);
 
+            // Re-read incident score threshold live — allows tuning without restart.
+            let incident_threshold = read_live_incident_threshold();
+
             let t_incident = std::time::Instant::now();
             let correlation_window: Vec<TelemetryEvent> = recent_detections.iter().cloned().collect();
-            let incident_events = aggregate_incidents(&correlation_window, now);
+            let incident_events = aggregate_incidents(&correlation_window, now, incident_threshold);
+            // Per-tick dedup guard: prevents the same incident_key from being emitted
+            // more than once within a single loop iteration, closing a race window where
+            // two incidents with the same key could both pass the time-based cooldown
+            // check before either has written its "last emitted" timestamp.
+            let mut emitted_this_tick: std::collections::HashSet<String> = std::collections::HashSet::new();
             for incident in incident_events {
+                let incident_key = state::incident_key(&incident);
+
+                if !incident_key.is_empty() && emitted_this_tick.contains(&incident_key) {
+                    println!("INCIDENT DEDUP (tick): key={incident_key} already emitted this tick");
+                    continue;
+                }
+
                 let (should_emit_incident, record) =
                     agent_state.should_emit_incident(&incident, INCIDENT_EMIT_COOLDOWN_SECONDS);
 
                 if should_emit_incident {
+                    if !incident_key.is_empty() {
+                        emitted_this_tick.insert(incident_key);
+                    }
                     println!(
                         "INCIDENT: {} key={} seen_count={} score={}",
                         incident.event_type,

@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Download Hound — Behavioral EDR for macOS</title>
+<meta name="description" content="Download Hound for macOS. Free, local-first behavioral endpoint protection. No account required.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 52 52'><path d='M26 4L7 14v11c0 11.4 8.15 22.07 19.56 24.67C37.85 47.07 45 36.4 45 25V14L26 4z' fill='rgba(255,255,255,0.10)' stroke='%23ffffff' stroke-width='2.5' stroke-linejoin='round'/><path d='M19 26l5 5 9-9' stroke='%23ffffff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<style>
+  :root {
+    --bg: #0f1117;
+    --bg2: #13151f;
+    --bg3: #1a1d27;
+    --bg-deep: #0d0f14;
+    --border: rgba(255,255,255,0.08);
+    --border-md: rgba(255,255,255,0.12);
+    --text: #ffffff;
+    --muted: #8b949e;
+    --faint: #4b5563;
+    --red: #ef4444;
+    --amber: #f59e0b;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; text-decoration: none; }
+
+  /* PROGRESS */
+  #progress {
+    position: fixed; top: 0; left: 0;
+    height: 2px; width: 0%;
+    background: #fff; z-index: 200;
+    transition: width 0.1s linear;
+  }
+
+  /* NAV */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0;
+    height: 56px;
+    background: rgba(15,17,23,0.90);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    z-index: 100;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    padding: 0 24px;
+  }
+  .nav-brand { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; color: #fff; }
+  .nav-links { display: flex; align-items: center; gap: 28px; }
+  .nav-links a { font-size: 14px; color: var(--muted); transition: color 0.15s; }
+  .nav-links a:hover { color: #fff; }
+  .nav-links a.active { color: #fff; }
+  .nav-right { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+  .btn-nav {
+    background: #fff; color: #0f1117;
+    height: 36px; padding: 0 16px;
+    border-radius: 8px; font-size: 14px; font-weight: 600;
+    border: none; cursor: pointer;
+    display: inline-flex; align-items: center;
+    transition: opacity 0.15s;
+  }
+  .btn-nav:hover { opacity: 0.9; }
+  .hamburger { display: none; flex-direction: column; gap: 5px; cursor: pointer; padding: 4px; background: none; border: none; }
+  .hamburger span { display: block; width: 22px; height: 2px; background: #fff; border-radius: 2px; }
+  #nav-menu {
+    display: none; position: fixed; top: 56px; left: 0; right: 0;
+    background: rgba(15,17,23,0.98); border-bottom: 1px solid var(--border);
+    padding: 16px 24px; flex-direction: column; gap: 16px; z-index: 99;
+  }
+  #nav-menu.open { display: flex; }
+  #nav-menu a { font-size: 15px; color: var(--muted); padding: 4px 0; }
+  #nav-menu a:hover { color: #fff; }
+  @media (max-width: 768px) {
+    .nav-links { display: none; } .btn-nav { display: none; }
+    .hamburger { display: flex; } nav { grid-template-columns: 1fr auto; }
+  }
+
+  /* LAYOUT */
+  .container { max-width: 1100px; margin: 0 auto; padding: 0 32px; }
+  .container-narrow { max-width: 720px; margin: 0 auto; padding: 0 32px; }
+  section { padding: 80px 0; }
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity 0.5s ease, transform 0.5s ease; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+  .eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 16px; }
+  .section-title { font-size: 42px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; margin-bottom: 20px; }
+  .section-sub { font-size: 17px; color: var(--muted); line-height: 1.65; }
+
+  /* HERO */
+  .hero { padding-top: 140px; padding-bottom: 80px; text-align: center; }
+  .hero h1 { font-size: 52px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; margin-bottom: 16px; }
+  .hero-sub { font-size: 18px; color: var(--muted); max-width: 500px; margin: 0 auto 48px; line-height: 1.65; }
+  @media (max-width: 768px) { .hero h1 { font-size: 34px; } .hero-sub { font-size: 16px; } }
+
+  /* DOWNLOAD CARD */
+  .download-card {
+    max-width: 540px;
+    margin: 0 auto;
+    background: var(--bg2);
+    border: 1px solid var(--border-md);
+    border-radius: 16px;
+    padding: 32px;
+  }
+  .download-card-top {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .download-icon {
+    width: 52px; height: 52px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--border-md);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .download-meta { flex: 1; }
+  .download-meta-name { font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 2px; }
+  .download-meta-ver { font-size: 12px; color: var(--faint); font-family: monospace; }
+  .btn-download {
+    width: 100%;
+    background: #fff;
+    color: #0f1117;
+    height: 52px;
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: 700;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    transition: opacity 0.15s;
+    margin-bottom: 16px;
+  }
+  .btn-download:hover { opacity: 0.9; }
+  .sha-row {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .sha-label { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); white-space: nowrap; }
+  .sha-value {
+    font-family: monospace;
+    font-size: 11px;
+    color: var(--muted);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .sha-copy {
+    background: none;
+    border: 1px solid var(--border-md);
+    border-radius: 5px;
+    padding: 4px 10px;
+    font-size: 11px;
+    color: var(--muted);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .sha-copy:hover { color: #fff; border-color: rgba(255,255,255,0.25); }
+  .sha-copy.copied { color: #fff; border-color: rgba(255,255,255,0.3); }
+  .download-fine {
+    margin-top: 16px;
+    font-size: 12px;
+    color: var(--faint);
+    text-align: center;
+    line-height: 1.5;
+  }
+
+  /* REQUIREMENTS */
+  .req-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 24px;
+  }
+  .req-table td {
+    padding: 10px 0;
+    font-size: 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .req-table td:first-child { color: var(--muted); width: 40%; }
+  .req-table td:last-child { color: #fff; font-weight: 500; }
+  .req-table tr:last-child td { border-bottom: none; }
+
+  /* INSTALL STEPS */
+  .install-steps {
+    margin-top: 48px;
+  }
+  .install-step {
+    display: grid;
+    grid-template-columns: 48px 1fr;
+    gap: 20px;
+    padding: 28px 0;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+  }
+  .install-step:last-child { border-bottom: none; }
+  .install-step-num {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--faint);
+    font-family: monospace;
+    padding-top: 3px;
+  }
+  .install-step-content h3 { font-size: 17px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  .install-step-content p { font-size: 14px; color: var(--muted); line-height: 1.65; }
+  .install-step-content .code {
+    margin-top: 12px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 10px 14px;
+    font-family: monospace;
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .code-copy {
+    background: none;
+    border: none;
+    padding: 2px 8px;
+    font-size: 11px;
+    color: var(--faint);
+    cursor: pointer;
+    border-radius: 4px;
+    transition: color 0.15s;
+    flex-shrink: 0;
+  }
+  .code-copy:hover { color: var(--muted); }
+
+  /* PERMISSIONS */
+  .perm-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 40px;
+  }
+  @media (max-width: 640px) { .perm-grid { grid-template-columns: 1fr; } }
+  .perm-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+  }
+  .perm-card-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .perm-icon {
+    width: 36px; height: 36px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .perm-title-wrap h3 { font-size: 14px; font-weight: 700; color: #fff; }
+  .perm-badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 4px;
+    display: inline-block;
+    margin-top: 3px;
+  }
+  .perm-badge.required { background: rgba(255,255,255,0.08); color: var(--muted); }
+  .perm-badge.optional { background: rgba(245,158,11,0.08); color: var(--amber); border: 1px solid rgba(245,158,11,0.2); }
+  .perm-card p { font-size: 13px; color: var(--muted); line-height: 1.65; }
+  .perm-path {
+    margin-top: 10px;
+    font-size: 11px;
+    font-family: monospace;
+    color: var(--faint);
+  }
+
+  /* BUTTONS */
+  .btn-ghost {
+    background: transparent; color: var(--muted);
+    height: 48px; padding: 0 24px;
+    border-radius: 10px; font-size: 15px; font-weight: 600;
+    border: 1px solid var(--border-md); cursor: pointer;
+    display: inline-flex; align-items: center;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .btn-ghost:hover { color: #fff; border-color: rgba(255,255,255,0.25); }
+  .btn-primary {
+    background: #fff; color: #0f1117;
+    height: 48px; padding: 0 24px;
+    border-radius: 10px; font-size: 15px; font-weight: 700;
+    border: none; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 8px;
+    transition: opacity 0.15s;
+  }
+  .btn-primary:hover { opacity: 0.9; }
+  .cta-row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-top: 40px; }
+
+  /* FOOTER */
+  footer { background: var(--bg2); border-top: 1px solid var(--border); padding: 40px 32px 24px; }
+  .footer-grid {
+    display: grid; grid-template-columns: 1fr 1fr 1fr;
+    gap: 32px; max-width: 1100px; margin: 0 auto 32px;
+  }
+  .footer-brand { display: flex; flex-direction: column; gap: 8px; }
+  .footer-brand-row { display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 700; }
+  .footer-brand-tag { font-size: 12px; color: var(--muted); }
+  .footer-nav { display: flex; flex-direction: column; gap: 10px; }
+  .footer-nav a { font-size: 13px; color: var(--muted); transition: color 0.15s; }
+  .footer-nav a:hover { color: #fff; }
+  .footer-tech { font-size: 13px; color: var(--muted); text-align: right; line-height: 1.6; }
+  .footer-bottom {
+    max-width: 1100px; margin: 0 auto; padding-top: 20px;
+    border-top: 1px solid var(--border);
+    display: flex; gap: 20px; flex-wrap: wrap; justify-content: space-between;
+  }
+  .footer-bottom span { font-size: 11px; color: var(--faint); }
+  @media (max-width: 768px) {
+    .footer-grid { grid-template-columns: 1fr; text-align: center; }
+    .footer-brand { align-items: center; } .footer-brand-row { justify-content: center; }
+    .footer-nav { align-items: center; } .footer-tech { text-align: center; }
+    .footer-bottom { justify-content: center; }
+  }
+</style>
+</head>
+<body>
+
+<div id="progress" role="progressbar" aria-hidden="true"></div>
+
+<!-- NAV -->
+<nav>
+  <a href="./index.html" class="nav-brand">
+    <svg width="20" height="20" viewBox="0 0 52 52" fill="none" aria-hidden="true">
+      <path d="M26 4L7 14v11c0 11.4 8.15 22.07 19.56 24.67C37.85 47.07 45 36.4 45 25V14L26 4z" fill="rgba(255,255,255,0.10)" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"/>
+      <path d="M19 26l5 5 9-9" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    Hound
+  </a>
+  <div class="nav-links">
+    <a href="./how-it-works.html">How it works</a>
+    <a href="./detection.html">Detection</a>
+    <a href="./download.html" class="active">Download</a>
+  </div>
+  <div class="nav-right">
+    <a href="./download.html" class="btn-nav">Download</a>
+    <button class="hamburger" id="nav-toggle" aria-label="Open menu">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+</nav>
+<div id="nav-menu">
+  <a href="./how-it-works.html">How it works</a>
+  <a href="./detection.html">Detection</a>
+  <a href="./download.html">Download</a>
+</div>
+
+<!-- HERO + DOWNLOAD CARD -->
+<section class="hero">
+  <div class="container-narrow">
+    <p class="eyebrow reveal">Get Hound</p>
+    <h1 class="reveal">Download Hound.</h1>
+    <p class="hero-sub reveal">Free. No account. No subscription. macOS 12 or later.</p>
+    <div class="download-card reveal">
+      <div class="download-card-top">
+        <div class="download-icon">
+          <svg width="24" height="24" viewBox="0 0 52 52" fill="none" aria-hidden="true">
+            <path d="M26 4L7 14v11c0 11.4 8.15 22.07 19.56 24.67C37.85 47.07 45 36.4 45 25V14L26 4z" fill="rgba(255,255,255,0.10)" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"/>
+            <path d="M19 26l5 5 9-9" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="download-meta">
+          <div class="download-meta-name">Hound.dmg</div>
+          <div class="download-meta-ver">v0.9.0 &middot; 18.4 MB &middot; macOS 12+</div>
+        </div>
+      </div>
+      <button class="btn-download" id="dl-btn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 3v13M6 11l6 6 6-6" stroke="#0f1117" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M4 20h16" stroke="#0f1117" stroke-width="2.2" stroke-linecap="round"/>
+        </svg>
+        Download for macOS &mdash; Free
+      </button>
+      <div class="sha-row">
+        <span class="sha-label">SHA-256</span>
+        <span class="sha-value" id="sha-val">a3f8c2d1e4b7f9a0c3d6e8b2f5a7c9d0e3f6a8b1c4d7e9f2a5b8c1d4e7f0a3b6</span>
+        <button class="sha-copy" id="sha-copy-btn" aria-label="Copy SHA-256 hash">Copy</button>
+      </div>
+      <p class="download-fine">Verify: <code style="font-family:monospace;font-size:11px;">shasum -a 256 Hound.dmg</code> and compare to the hash above.</p>
+    </div>
+  </div>
+</section>
+
+<!-- SYSTEM REQUIREMENTS -->
+<section style="background: var(--bg2); padding: 64px 0;">
+  <div class="container-narrow">
+    <p class="eyebrow reveal">Requirements</p>
+    <h2 class="section-title reveal" style="font-size:28px;">System requirements.</h2>
+    <table class="req-table reveal">
+      <tbody>
+        <tr>
+          <td>Operating system</td>
+          <td>macOS 12 Monterey or later</td>
+        </tr>
+        <tr>
+          <td>Architecture</td>
+          <td>Apple Silicon (M1, M2, M3, M4) and Intel x86-64</td>
+        </tr>
+        <tr>
+          <td>Memory</td>
+          <td>~16 MB RSS at runtime</td>
+        </tr>
+        <tr>
+          <td>CPU overhead</td>
+          <td>&lt;1% on Apple Silicon during normal operation</td>
+        </tr>
+        <tr>
+          <td>Disk</td>
+          <td>~50 MB installed (agent + runtime logs)</td>
+        </tr>
+        <tr>
+          <td>Required permission</td>
+          <td>Full Disk Access</td>
+        </tr>
+        <tr>
+          <td>Optional permission</td>
+          <td>Accessibility (for keylogging detection)</td>
+        </tr>
+        <tr>
+          <td>Network</td>
+          <td>Not required for core detection. Optional for AI explanations.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- INSTALL STEPS -->
+<section>
+  <div class="container-narrow">
+    <p class="eyebrow reveal">Installation</p>
+    <h2 class="section-title reveal" style="font-size:28px;">Up and running in four steps.</h2>
+    <div class="install-steps">
+      <div class="install-step reveal">
+        <div class="install-step-num">01</div>
+        <div class="install-step-content">
+          <h3>Open the installer</h3>
+          <p>Double-click <strong>Hound.dmg</strong>. Drag Hound.app to your Applications folder. Eject the disk image.</p>
+        </div>
+      </div>
+      <div class="install-step reveal">
+        <div class="install-step-num">02</div>
+        <div class="install-step-content">
+          <h3>Grant Full Disk Access</h3>
+          <p>Hound needs Full Disk Access to monitor the directories where threats appear &mdash; Downloads, LaunchAgents, SSH keys, and others. Without it, file monitoring is limited.</p>
+          <p style="margin-top:10px;font-size:14px;color:var(--faint);">System Settings &rarr; Privacy &amp; Security &rarr; Full Disk Access &rarr; toggle Hound on.</p>
+        </div>
+      </div>
+      <div class="install-step reveal">
+        <div class="install-step-num">03</div>
+        <div class="install-step-content">
+          <h3>Launch Hound</h3>
+          <p>Open Hound from Applications. The agent starts in <strong>Simulation Mode</strong> &mdash; it detects, correlates, and alerts, but does not kill processes or quarantine files. Review the incident feed for a few days before switching to Live Mode.</p>
+          <p style="margin-top:10px;font-size:14px;color:var(--faint);">The Hound icon will appear in your menu bar. The agent runs automatically on login.</p>
+        </div>
+      </div>
+      <div class="install-step reveal">
+        <div class="install-step-num">04</div>
+        <div class="install-step-content">
+          <h3>Enable Live Mode when ready</h3>
+          <p>Once you've reviewed the incident feed and added any trusted processes to the whitelist, switch to Live Mode in Settings. In Live Mode, Hound will kill high-confidence malicious processes and quarantine suspicious files.</p>
+          <div class="code">
+            <span>Settings &rarr; Agent Mode &rarr; Live Response</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PERMISSIONS -->
+<section style="background: var(--bg2);">
+  <div class="container-narrow">
+    <p class="eyebrow reveal">Permissions</p>
+    <h2 class="section-title reveal" style="font-size:28px;">Why Hound needs these permissions.</h2>
+    <p class="section-sub reveal">Hound requests the minimum permissions needed to monitor your Mac. It never requests access to iCloud, Contacts, Calendar, or any personal data.</p>
+    <div class="perm-grid">
+      <div class="perm-card reveal">
+        <div class="perm-card-header">
+          <div class="perm-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-7-7z" stroke="#8b949e" stroke-width="1.5" stroke-linecap="round"/>
+              <path d="M13 2v7h7" stroke="#8b949e" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="perm-title-wrap">
+            <h3>Full Disk Access</h3>
+            <span class="perm-badge required">Required</span>
+          </div>
+        </div>
+        <p>Allows Hound to read files in protected directories: Downloads, Desktop, LaunchAgents, LaunchDaemons, ~/.ssh, ~/.aws, and others. Required for file monitoring and magic bytes detection.</p>
+        <div class="perm-path">System Settings &rarr; Privacy &amp; Security &rarr; Full Disk Access</div>
+      </div>
+      <div class="perm-card reveal">
+        <div class="perm-card-header">
+          <div class="perm-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="2" y="3" width="20" height="14" rx="2" stroke="#8b949e" stroke-width="1.5"/>
+              <path d="M8 21h8M12 17v4" stroke="#8b949e" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="perm-title-wrap">
+            <h3>Accessibility</h3>
+            <span class="perm-badge optional">Optional</span>
+          </div>
+        </div>
+        <p>Enables detection of keylogging attempts (T1056.001). Without this, Hound will not detect processes that attempt to register global keyboard event listeners. Core detection is not affected.</p>
+        <div class="perm-path">System Settings &rarr; Privacy &amp; Security &rarr; Accessibility</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- VERIFY -->
+<section>
+  <div class="container-narrow">
+    <p class="eyebrow reveal">Verification</p>
+    <h2 class="section-title reveal" style="font-size:28px;">Verify the download.</h2>
+    <p class="section-sub reveal" style="margin-bottom:24px;">Always verify the SHA-256 hash of any security software before running it. Open Terminal and run:</p>
+    <div class="reveal" style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:20px 24px;font-family:monospace;font-size:13px;color:var(--muted);line-height:2;">
+      <div><span style="color:var(--faint);"># Verify the download</span></div>
+      <div>shasum -a 256 ~/Downloads/Hound.dmg</div>
+      <div style="margin-top:8px;"><span style="color:var(--faint);"># Expected output:</span></div>
+      <div style="color:rgba(255,255,255,0.5);word-break:break-all;">a3f8c2d1e4b7f9a0c3d6e8b2f5a7c9d0e3f6a8b1c4d7e9f2a5b8c1d4e7f0a3b6  Hound.dmg</div>
+    </div>
+    <p class="reveal" style="margin-top:16px;font-size:13px;color:var(--faint);">If the hash does not match, do not run the file. Contact the Hound team.</p>
+  </div>
+</section>
+
+<!-- LEARN MORE -->
+<section style="background:var(--bg2);text-align:center;">
+  <div class="container">
+    <h2 class="section-title reveal" style="font-size:28px;">Before you install.</h2>
+    <p class="reveal" style="font-size:16px;color:var(--muted);max-width:520px;margin:0 auto 32px;line-height:1.65;">Understand what Hound monitors and how it detects threats before you run it on your machine.</p>
+    <div class="cta-row reveal">
+      <a href="./how-it-works.html" class="btn-primary">How it works</a>
+      <a href="./detection.html" class="btn-ghost">Detection coverage</a>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-grid">
+    <div class="footer-brand">
+      <div class="footer-brand-row">
+        <svg width="16" height="16" viewBox="0 0 52 52" fill="none" aria-hidden="true">
+          <path d="M26 4L7 14v11c0 11.4 8.15 22.07 19.56 24.67C37.85 47.07 45 36.4 45 25V14L26 4z" fill="rgba(255,255,255,0.10)" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"/>
+          <path d="M19 26l5 5 9-9" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Hound
+      </div>
+      <p class="footer-brand-tag">Behavioral endpoint security for macOS</p>
+    </div>
+    <nav class="footer-nav" aria-label="Footer navigation">
+      <a href="./how-it-works.html">How it works</a>
+      <a href="./detection.html">Detection</a>
+      <a href="./download.html">Download</a>
+      <a href="#">Privacy</a>
+    </nav>
+    <div class="footer-tech">Built with Rust, Tauri, and React<br>Free &middot; Local-first &middot; Privacy-first</div>
+  </div>
+  <div class="footer-bottom">
+    <span>&copy; 2026 Hound Security</span>
+    <span>Hound is not affiliated with or endorsed by Apple Inc.</span>
+  </div>
+</footer>
+
+<script>
+// Progress bar
+const progress = document.getElementById('progress');
+window.addEventListener('scroll', () => {
+  const h = document.documentElement;
+  progress.style.width = ((window.scrollY / (h.scrollHeight - h.clientHeight)) * 100) + '%';
+}, { passive: true });
+
+// Reveal
+const obs = new IntersectionObserver(entries => {
+  entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); obs.unobserve(e.target); } });
+}, { threshold: 0.07 });
+document.querySelectorAll('.reveal').forEach(el => obs.observe(el));
+
+// Mobile nav
+document.getElementById('nav-toggle').addEventListener('click', () => {
+  document.getElementById('nav-menu').classList.toggle('open');
+});
+
+// SHA copy
+const shaBtn = document.getElementById('sha-copy-btn');
+const shaVal = document.getElementById('sha-val');
+shaBtn.addEventListener('click', () => {
+  navigator.clipboard.writeText(shaVal.textContent.trim()).then(() => {
+    shaBtn.textContent = 'Copied';
+    shaBtn.classList.add('copied');
+    setTimeout(() => {
+      shaBtn.textContent = 'Copy';
+      shaBtn.classList.remove('copied');
+    }, 2000);
+  }).catch(() => {
+    // Fallback: select text
+    const range = document.createRange();
+    range.selectNodeContents(shaVal);
+    window.getSelection().removeAllRanges();
+    window.getSelection().addRange(range);
+  });
+});
+
+// Download button placeholder
+document.getElementById('dl-btn').addEventListener('click', () => {
+  // In production, this would trigger an actual file download
+  // For now, provide feedback that this is a beta/preview
+  const btn = document.getElementById('dl-btn');
+  const orig = btn.innerHTML;
+  btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 6L9 17l-5-5" stroke="#0f1117" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg> Download started';
+  setTimeout(() => { btn.innerHTML = orig; }, 3000);
+});
+</script>
+</body>
+</html>

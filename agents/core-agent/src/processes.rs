@@ -1,11 +1,11 @@
 use crate::classify::{classify_path, classify_process_command};
 use crate::command_features::extract_features;
 use crate::models::{ProcessEvent, ProcessInfo, ProcessKey, TelemetryEvent};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde_json::json;
 use std::collections::HashMap;
-use std::process::Command;
+use sysinfo::System;
 
 #[derive(Debug, Clone)]
 struct RawProcessInfo {
@@ -15,17 +15,18 @@ struct RawProcessInfo {
     args: String,
 }
 
-pub fn snapshot_processes() -> Result<HashMap<ProcessKey, ProcessInfo>> {
-    let raw_processes = snapshot_raw_processes()?;
+pub fn snapshot_processes(sys: &mut System) -> Result<HashMap<ProcessKey, ProcessInfo>> {
+    let raw_processes = snapshot_raw_processes(sys);
     let current = enrich_with_parent_context(raw_processes);
     Ok(current)
 }
 
 pub fn collect_new_process_events(
+    sys: &mut System,
     previous: &HashMap<ProcessKey, ProcessInfo>,
     now: DateTime<Utc>,
 ) -> Result<(HashMap<ProcessKey, ProcessInfo>, Vec<ProcessEvent>)> {
-    let current = snapshot_processes()?;
+    let current = snapshot_processes(sys)?;
     let mut events = Vec::new();
 
     for (key, process) in &current {
@@ -59,30 +60,45 @@ pub fn collect_new_process_events(
     Ok((current, events))
 }
 
-fn snapshot_raw_processes() -> Result<HashMap<ProcessKey, RawProcessInfo>> {
-    let output = Command::new("ps")
-        .args(["-axo", "pid=,ppid=,lstart=,command="])
-        .output()
-        .context("failed to execute ps command")?;
+/// Enumerate running processes using sysinfo (kernel API, no subprocess spawn).
+/// Uses process start_time as uniqueness hint to prevent PID-reuse false positives.
+/// Accepts a long-lived `System` object to avoid the allocation overhead of
+/// creating a new one every tick — caller owns the `System` across iterations.
+fn snapshot_raw_processes(sys: &mut System) -> HashMap<ProcessKey, RawProcessInfo> {
+    sys.refresh_processes();
 
-    if !output.status.success() {
-        anyhow::bail!("ps command failed with status {:?}", output.status.code());
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
     let mut processes = HashMap::new();
 
-    for line in stdout.lines() {
-        if let Some((key, info)) = parse_ps_line(line) {
-            if should_ignore_raw_process(&info) {
-                continue;
-            }
+    for (pid, process) in sys.processes() {
+        let pid_i32 = pid.as_u32() as i32;
+        let ppid_i32 = process.parent().map(|p| p.as_u32() as i32).unwrap_or(0);
 
-            processes.insert(key, info);
-        }
+        // Use exe path when available for accurate path classification;
+        // fall back to process name (basename only).
+        let command = process
+            .exe()
+            .map(|p| p.to_string_lossy().into_owned())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| process.name().to_string());
+
+        // argv[0] is the program name/path — skip it; rest are the arguments.
+        let args: String = process
+            .cmd()
+            .iter()
+            .skip(1)
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        // start_time is seconds since Unix epoch — stable across enumeration ticks.
+        let start_hint = process.start_time().to_string();
+
+        let raw = RawProcessInfo { pid: pid_i32, ppid: ppid_i32, command, args };
+        let key = ProcessKey { pid: pid_i32, start_hint };
+        processes.insert(key, raw);
     }
 
-    Ok(processes)
+    processes
 }
 
 fn enrich_with_parent_context(
@@ -123,55 +139,6 @@ fn enrich_with_parent_context(
         .collect()
 }
 
-fn parse_ps_line(line: &str) -> Option<(ProcessKey, RawProcessInfo)> {
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let parts: Vec<&str> = trimmed.split_whitespace().collect();
-    if parts.len() < 8 {
-        return None;
-    }
-
-    let pid = parts[0].parse::<i32>().ok()?;
-    let ppid = parts[1].parse::<i32>().ok()?;
-    let start_hint = parts[2..7].join(" ");
-    let command_and_args = parts[7..].join(" ");
-
-    if command_and_args.is_empty() {
-        return None;
-    }
-
-    let (command, args) = split_command_and_args(&command_and_args);
-
-    let key = ProcessKey { pid, start_hint };
-    let info = RawProcessInfo {
-        pid,
-        ppid,
-        command,
-        args,
-    };
-
-    Some((key, info))
-}
-
-fn split_command_and_args(command_and_args: &str) -> (String, String) {
-    let trimmed = command_and_args.trim();
-
-    if trimmed.is_empty() {
-        return ("".to_string(), "".to_string());
-    }
-
-    if let Some(space_idx) = trimmed.find(' ') {
-        let command = trimmed[..space_idx].trim().to_string();
-        let args = trimmed[space_idx + 1..].trim().to_string();
-        (command, args)
-    } else {
-        (trimmed.to_string(), String::new())
-    }
-}
-
 fn normalize_command_token(command: &str) -> String {
     let trimmed = command.trim();
 
@@ -190,29 +157,4 @@ fn normalize_command_token(command: &str) -> String {
     }
 
     without_parens.to_string()
-}
-
-fn should_ignore_raw_process(process: &RawProcessInfo) -> bool {
-    let command = normalize_command_token(&process.command);
-    let args = process.args.as_str();
-
-    let full = if args.is_empty() {
-        command.clone()
-    } else {
-        format!("{command} {args}")
-    };
-
-    if command == "ps" {
-        return true;
-    }
-
-    if command.contains("/bin/ps") || command.contains("/usr/bin/ps") {
-        return true;
-    }
-
-    if full.contains("ps -axo pid=,ppid=,lstart=,command=") {
-        return true;
-    }
-
-    false
 }

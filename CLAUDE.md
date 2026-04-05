@@ -1,8 +1,12 @@
+# HOUND — CLAUDE CODE MASTER PROMPT
+# Updated: April 2026
+# Paste this file into your repo root as CLAUDE.md — Claude Code reads it automatically every session.
 
+---
 
 ## YOUR ROLE
 
-You are acting as Lead Security Architect and Principal Rust Engineer on Agent Security — a local-first, AI-assisted endpoint cybersecurity platform for macOS. You have full access to this codebase and will help design, build, and improve it to production quality.
+You are acting as Lead Security Architect and Principal Rust Engineer on Hound — a local-first, AI-assisted endpoint cybersecurity platform for macOS. You have full access to this codebase and will help design, build, and improve it to production quality.
 
 Think like a principal engineer at CrowdStrike or SentinelOne. Do not oversimplify. Do not suggest toy solutions. Every decision should be defensible in a real security product.
 
@@ -10,7 +14,7 @@ Think like a principal engineer at CrowdStrike or SentinelOne. Do not oversimpli
 
 ## PRODUCT VISION
 
-Agent Security is a free, consumer and SMB-grade Endpoint Detection and Response (EDR) agent for macOS. The goal is to give everyday users and small businesses genuine peace of mind — the kind of protection that today only exists in expensive enterprise tools.
+Hound is a free, consumer and SMB-grade Endpoint Detection and Response (EDR) agent for macOS. The goal is to give everyday users and small businesses genuine peace of mind — the kind of protection that today only exists in expensive enterprise tools.
 
 **Core principles:**
 - Local-first. No cloud dependency for core detection. User data stays on device.
@@ -23,291 +27,438 @@ Agent Security is a free, consumer and SMB-grade Endpoint Detection and Response
 
 ---
 
-## WHAT HAS ALREADY BEEN BUILT
+## REPOSITORY STRUCTURE
 
-### Repository Structure
 ```
-Agent-Security/
-├── agents/core-agent/       # Rust EDR engine (primary focus)
-├── apps/desktop/            # Tauri + React desktop UI (in progress)
-├── runtime/logs/            # JSONL telemetry output
-└── docs/                    # Architecture docs
+Hound/
+├── agents/core-agent/           # Rust EDR engine (primary focus)
+│   ├── src/
+│   │   ├── main.rs              # Entry point, main loop, CLI flags
+│   │   ├── config.rs            # Config loading, whitelist, simulation mode (live read)
+│   │   ├── detections.rs        # All atomic detection functions (165 tests)
+│   │   ├── incidents.rs         # Incident correlation engine
+│   │   ├── response.rs          # Response engine with guardrails + whitelist
+│   │   ├── files.rs             # File monitoring, magic bytes, tracked directories
+│   │   ├── processes.rs         # Process monitoring and classification
+│   │   ├── network.rs           # Network telemetry via lsof polling
+│   │   ├── persistence_monitor.rs # Cron, login hooks, BTM database monitoring
+│   │   ├── command_patterns.rs  # LOLBin and command injection detection
+│   │   ├── config_integrity.rs  # SHA256 config + log tamper detection
+│   │   ├── logging.rs           # JSONL telemetry with log rotation
+│   │   ├── perf.rs              # Per-subsystem performance instrumentation
+│   │   └── bin/watchdog.rs      # Standalone watchdog binary
+│   └── Cargo.toml               # default-run = "core-agent"
+├── apps/desktop/                # Tauri + React desktop UI
+│   ├── src/
+│   │   ├── App.tsx              # Main app, event subscription, state
+│   │   ├── components/
+│   │   │   ├── TopBar.tsx       # Protection status, simulation banner
+│   │   │   ├── Sidebar.tsx      # Nav with incident count badge
+│   │   │   ├── IncidentFeed.tsx # Inbox model, burst mode banner, alert grouping
+│   │   │   ├── IncidentDetail.tsx # Attack timeline, MITRE techniques
+│   │   │   ├── StoryLine.tsx    # Plain-English incident narrative
+│   │   │   ├── HealthDashboard.tsx # Stats, charts, simulation toggle
+│   │   │   └── SettingsView.tsx # API key (Keychain), whitelist editor, log path
+│   │   └── utils.ts             # JSON parsing, incident field extraction
+│   └── src-tauri/src/lib.rs     # All Tauri commands
+├── runtime/
+│   ├── logs/
+│   │   ├── agent-events.jsonl   # Primary telemetry (50MB rotation, 5 files)
+│   │   ├── response-audit.jsonl # Every response action taken (20MB rotation)
+│   │   ├── storylines.jsonl     # Permanent StoryLine history, never deleted
+│   │   ├── perf-stats.jsonl     # Performance metrics per subsystem
+│   │   └── watchdog.log         # Watchdog restart events
+│   ├── agent-config.toml        # All runtime configuration
+│   ├── acknowledged-incidents.json # UI acknowledgement state
+│   ├── baseline.db              # SQLite behavioral baseline (persists across restarts)
+│   └── quarantine/              # Quarantined files with SHA256 manifest
+├── scripts/
+│   └── red_team_test.sh         # 10-chain red team test suite
+└── docs/                        # Architecture docs
 ```
 
-### Core Agent Capabilities (Rust)
+---
 
-**1. File Monitoring**
-Monitors: ~/Downloads, ~/Desktop, ~/Documents, ~/Library/LaunchAgents
+## CURRENT CAPABILITIES — FULLY BUILT
+
+### Core Agent (Rust)
+
+**File Monitoring**
+Monitors: ~/Downloads, ~/Desktop, ~/Documents, ~/Library/LaunchAgents, ~/Library/LaunchDaemons, /etc/periodic/daily|weekly|monthly, ~/.ssh, ~/.aws, /var/db/com.apple.backgroundtaskmanagement
 Detects: file_created, file_modified, file_became_executable, file_gained_quarantine
+Magic bytes: reads first bytes to detect file type mismatch (executable disguised as .pdf, .jpg, etc.)
 
-**2. Process Monitoring**
+**Process Monitoring**
 Records: pid, parent_pid, command, args, process_kind, parent_process_kind, command_path_kind, parent_path_kind
-
 Process kinds: system | browser | interpreter | user_app | unknown
 Path kinds: downloads | user_space | system_space | persistence | unknown
 
-**3. Atomic Detections (Behavioral Signals)**
+**Network Telemetry**
+Polls lsof -i every tick, parses connections, filters private/loopback IPs
+Tracks per-PID connection history, detects C2 beaconing patterns
+Apple IP range (17.0.0.0/8) and 30+ Apple daemon names suppressed from beaconing alerts
+Google IP ranges suppressed (8.8.8.8/8, 142.250.0.0/15, 172.217.0.0/16, etc.)
+
+**Persistence Monitoring**
+LaunchAgents, LaunchDaemons, /etc/periodic scripts, crontab polling
+BTM database file watch (/var/db/com.apple.backgroundtaskmanagement) — no sfltool password prompt
+Login hooks via com.apple.loginwindow defaults domain
+
+**Command Pattern Detection**
+LOLBin abuse: curl|bash, wget|sh, base64 --decode|bash, python -c, osascript -e, eval $()
+LOLBins list: bash, sh, zsh, osascript, python, python3, ruby, perl, curl, wget, nc, ncat, openssl, sftp, scp, rsync, launchctl, PlistBuddy, xattr, ditto, tar, zip
+
+**Agent Self-Protection**
+Watchdog binary: polls pgrep -x core-agent every 5s, respawns if down, max 10 restarts/hour
+Config integrity: SHA256 check on agent-config.toml every 60s, reverts to safe defaults if tampered
+Log integrity: tamper-evident line-count + last-line hash on agent-events.jsonl
+Directory permissions: enforces 0o700 on runtime/logs/ and runtime/quarantine/
+
+**Persistent Baseline (SQLite)**
+runtime/baseline.db with tables: known_processes, known_connections, known_files
+Processes seen 10+ times get -15pt suspicion score reduction
+Connections seen 5+ times suppress C2 beaconing alerts
+File execution history prevents re-alerting on known-safe executables
+--clear-baseline CLI flag available
+
+**Performance Instrumentation**
+6 subsystems instrumented: file_monitor, process_monitor, persistence_monitor, network_monitor, detection_eval, incident_correlation
+Flushes min/mean/p95/max to runtime/logs/perf-stats.jsonl every 30s
+RSS memory tracked every 5 minutes
+CPU throttle: if subsystem exceeds 50ms, adds 50ms to next sleep
+--perf-report CLI flag prints formatted summary table
+
+### Detection Engine — 165 Tests, All Passing
+
+**MITRE ATT&CK Coverage: ~95% (user-space ceiling)**
+
+**Execution (T1059.x, T1204, T1569, T1218)**
 - alert_downloaded_file_executed
 - alert_interpreter_launch_from_downloads
+- alert_interpreter_abuse
+- alert_interpreter_spawned_follow_on_binary
 - alert_suspicious_shell_chain
+- alert_lolbin_execution
+- alert_curl_pipe_bash
+- alert_command_injection_pattern
+- alert_command_pattern_abuse
+- alert_signed_binary_proxy_execution
+
+**Persistence (T1543.004, T1547.001, T1053.003, T1037.002, T1547.011)**
+- alert_persistence_artifact_touched
+- alert_login_item_added
+- alert_crontab_modified
+- alert_login_hook_installed
+- alert_plist_modification
+
+**Privilege Escalation (T1548.001, T1548.003, T1548.004)**
+- alert_privilege_escalation_attempt
+- alert_suspicious_sudo_execution
+
+**Defense Evasion (T1222.002, T1553.001, T1036, T1070, T1562.001)**
 - alert_file_became_executable
 - alert_quarantined_file_activity
-- alert_persistence_artifact_touched
+- alert_process_masquerading
+- alert_double_extension_execution
+- alert_file_type_mismatch
+- alert_indicator_removal_attempt
+- alert_security_tool_tampering
+- alert_boot_security_tamper
+
+**Credential Access (T1555.001, T1555.003, T1552.001, T1552.004, T1056.001)**
+- alert_keychain_access_attempt
+- alert_browser_credential_access
+- alert_ssh_key_access
+- alert_credential_file_access
+- alert_keylogging_attempt
+
+**Discovery (T1082, T1016, T1083)**
+- alert_system_recon_detected
+- alert_network_recon_detected
+- alert_filesystem_recon_detected
+
+**Lateral Movement (T1021.004)**
+- alert_ssh_lateral_movement
+- alert_ssh_key_tampering
+
+**Collection (T1005, T1560, T1113)**
+- alert_data_staging_detected
+- alert_suspicious_archive_creation
+- alert_screen_capture_attempt
+- alert_suspicious_media_access
+
+**Command & Control (T1071, T1105)**
+- alert_process_network_connection
+- alert_c2_beaconing_pattern
+
+**Exfiltration (T1041, T1567)**
+- alert_suspected_exfiltration
+- alert_upload_command_detected
+
+**Impact (T1486, T1485, T1489)**
+- alert_ransomware_behavior_detected (sub-signals: ransomware_extension_wave, ransom_note_created, backup_tampering, mass_file_modification)
 - alert_burst_file_activity
 
-**4. Incident Correlation Engine**
-Correlates atomic signals into behavioral incidents with:
-- severity score
-- confidence score
-- supporting_events[]
-- attack chain reconstruction (e.g. download → chmod → interpreter → child process)
-Produces: alert_behavioral_incident
+**Account & Persistence (T1078, T1136)**
+- alert_account_manipulation
 
-**5. Automated Response Engine**
-Actions: process_kill, file_quarantine (moves to runtime/quarantine/)
-Currently running in simulation_mode = true
-Produces: response_simulated_process_kill, response_simulated_file_quarantine
+**Self-protection**
+- alert_config_tampered
+- alert_log_tampered
+- alert_dir_permission_corrected
+- alert_agent_killed (watchdog)
 
-**6. Response Guardrails**
-Will NOT act on:
-- Safe process kinds: system, browser
-- Safe path kinds: system_space, persistence
+### Incident Correlation Engine
+- Threshold: 20 points minimum to produce alert_behavioral_incident
+- File-path-based correlation: alerts on same file within 60s group even without shared pid
+- Attack chain scoring with time-window bonus (8pts if all signals within 30s)
+- Repeat offender bonus (8-12pts if single PID drives 3+ signals)
+- MITRE technique tagging on every incident (mitre_techniques[] array)
+- 20+ attack chain labels: download_and_execute, curl_pipe_bash, persistence_installation, credential_theft, ransomware_attack, staging_and_exfil, lateral_movement_chain, etc.
+
+**Incident Scoring (key signal weights):**
+- alert_ransomware_behavior_detected: 30pts
+- alert_suspected_exfiltration: 24pts
+- alert_ssh_lateral_movement: 20pts
+- alert_keychain_access_attempt: 18pts
+- alert_browser_credential_access: 18pts
+- alert_data_staging_detected: 18pts
+- alert_curl_pipe_bash: 22pts
+- alert_command_injection_pattern: 20pts
+- alert_boot_security_tamper: 30pts
+- alert_security_tool_tampering: 28pts
+- tight_time_window_bonus: 8pts
+- repeat_offender_pid_bonus: 8-12pts
+
+### Response Engine
+Real mode available (simulation_mode read live from config on every decision)
+Actions: process_kill (with full process tree), file_quarantine (moves to runtime/quarantine/ with SHA256 manifest)
+Cooldown: 60s per-incident to prevent re-triggering
+Rollback: restore quarantined file by hash with verification
+Audit log: every action to runtime/logs/response-audit.jsonl
+User notification hook: response_user_notification event for UI
+
+**Response decision order:**
+1. Guardrails check (system processes, browsers, safe extensions — hard block)
+2. Whitelist check (trusted process names/paths/app bundles — hard block, logs response_blocked_by_whitelist)
+3. Simulation mode check (if true, simulate only)
+4. Act (real kill or quarantine)
+
+**Guardrails — will NEVER act on:**
+- process_kind: system, browser
+- path_kind: system_space (for quarantine)
 - Safe extensions: jpg, png, pdf, docx, pptx, mp3, mp4, txt, md
-Quarantine candidate extensions: app, pkg, dmg, zip, sh, py, js, command, jar, bin
-Blocked responses log: response_blocked_by_guardrail
 
-**7. Persistence Detection**
-Monitors: ~/Library/LaunchAgents/*.plist, ~/Library/LaunchDaemons/*.plist
-Triggers: alert_persistence_artifact_touched
+**Quarantine candidate extensions:** app, pkg, dmg, zip, sh, py, js, command, jar, bin
 
-**8. Telemetry Logging**
-All events → runtime/logs/agent-events.jsonl
-Includes: file events, process events, detections, incidents, responses
+### Whitelist System
+Three groups: trusted_process_paths, trusted_process_names, trusted_app_bundle_paths
+Hot-reloadable from agent-config.toml — no restart required
+UI-editable from Settings → Trusted Processes
+response_blocked_by_whitelist events appear in UI with blue styling
+--list-whitelist CLI flag prints current entries
 
----
+### Log Rotation
+agent-events.jsonl: 50MB max, 5 rotated files kept
+response-audit.jsonl + storylines.jsonl: 20MB max, 10 rotated files
+Rotation event logged as event_type: log_rotated
 
-## CURRENT MITRE ATT&CK COVERAGE
+### Desktop UI (Tauri + React)
 
-Overall coverage score: ~28%. The platform covers the highest-value detection points
-but has significant gaps in network visibility, credential access, and lateral movement.
+**Protection Status Hero**
+Shield icon with breathing pulse animation (3s cycle, CSS @keyframes)
+Three states: Protected (green glow), Threat Detected (red, faster pulse), Agent Offline (gray, no pulse)
+Stats row: threats blocked, events analyzed, uptime
 
-### COVERED (solid detection exists)
-- T1059.004 — Unix shell execution (alert_suspicious_shell_chain)
-- T1059.006 — Python execution (interpreter classification)
-- T1204.002 — Malicious file execution (alert_downloaded_file_executed)
-- T1543.004 — Launch Agent/Daemon persistence (alert_persistence_artifact_touched)
-- T1222.002 — File permissions modification (alert_file_became_executable)
+**Inbox Model**
+- Inbox: unacknowledged incidents, badge shows count
+- Resolved: acknowledged items with resolved_reason (user_acknowledged, file_removed, process_ended, quarantined, whitelisted)
+- All Activity: complete history, never deletes
 
-### PARTIAL (detection exists but incomplete)
-- T1059.002 — AppleScript/osascript (classified as interpreter, no argument analysis)
-- T1553.001 — Gatekeeper bypass (quarantine attribute tracked, bypass patterns not correlated)
-- T1548.001 — Setuid/setgid (chmod detected, not specifically tracking setuid bits)
-- T1083 — File/directory discovery (events captured, rapid traversal not flagged)
-- T1057 — Process discovery (processes monitored, ps/top recon not detected)
-- T1105 — Ingress tool transfer (curl/wget classified, not correlated to C2 patterns)
-- T1486 — Ransomware/data encryption (burst file activity exists, no rename wave detection)
+**Burst Mode**
+5+ alerts in 10 seconds → amber banner "Attack activity detected — analyzing X signals..."
+Collapses to grouped incident summary after 15s of quiet
 
-### MISSING — HIGH PRIORITY GAPS TO BUILD NEXT
+**Notification Throttling**
+One system notification per alert_behavioral_incident maximum
+3+ incidents in 30s → single summary notification
+notification_cooldown_ms = 30000 in config
 
-**Execution**
-- T1569 — System services execution (no launchctl/launchd command monitoring)
-- T1106 — Native API abuse (requires kernel extension / System Extension)
+**StoryLine Feature**
+Every incident gets a permanent plain-English narrative:
+- headline: one sentence summary
+- what_happened: 2-3 sentences explaining the attack chain
+- what_was_targeted: specific files, processes, paths
+- how_it_was_caught: which detections fired and why they matter
+- what_we_did: response action taken or simulated
+- mitre_summary: plain-English ATT&CK mapping
+- verdict: Blocked | Simulated block | Monitoring
 
-**Persistence**
-- T1547.001 — Login items (no SMJobBless / ServiceManagement monitoring)
-- T1053.003 — Cron jobs (no crontab monitoring)
-- T1037.002 — Login/logout hooks (com.apple.loginwindow not monitored)
-- T1176 — Browser extensions (no extension installation monitoring)
+Two paths:
+- Path A (no API key): deterministic template-based generation from structured incident data — works offline, always available
+- Path B (API key configured): Claude Haiku enhances the narrative via Anthropic API, result cached, "✨ Enhanced with AI" badge shown
 
-**Privilege Escalation**
-- T1548.004 — Elevated execution with prompt (no AuthorizationExecuteWithPrivileges monitoring)
-- T1134 — Access token manipulation (no token/credential context in process telemetry)
+StoryLines written to runtime/logs/storylines.jsonl permanently — the user's complete security history.
 
-**Defense Evasion**
-- T1036 — Masquerading (no process name vs binary path validation)
-- T1070 — Indicator removal / log deletion (no history clearing detection)
-- T1027 — Obfuscated files (no entropy analysis)
+**History Tab**
+All StoryLines ever generated, searchable by keyword, filterable by verdict and risk level.
 
-**Credential Access — HIGH VALUE**
-- T1555.001 — Keychain access (no `security` command or Keychain API monitoring)
-- T1552.001 — Credentials in files (no plaintext credential scanning)
-- T1056.001 — Keylogging (requires kernel-level input monitoring)
+**Settings**
+- Trusted Processes: add/remove whitelist entries, writes live to agent-config.toml
+- API Key: stored in macOS Keychain (com.hound.app), never on disk
+- Log path diagnostic: shows exact path being watched
+- Simulation Mode toggle
 
-**Discovery**
-- T1082 — System info discovery (no uname/sw_vers/system_profiler monitoring)
-- T1016 — Network config discovery (no ifconfig/networksetup monitoring)
+**Alert Feed**
+- Recent Alerts section shows atomic alerts grouped by file/process
+- Individual alerts persist until explicitly acknowledged (no auto-disappear)
+- Acknowledge All button + per-alert dismiss (×)
+- response_blocked_by_whitelist appears in blue ("Whitelisted — [process name]")
 
-**Lateral Movement**
-- T1021.004 — SSH (no SSH connection or key usage monitoring)
-- T1021.005 — VNC / remote desktop (no remote desktop monitoring)
+**Health Dashboard**
+6-stat grid, severity breakdown bar chart, MITRE ATT&CK bar chart
+Simulation mode toggle writes live to agent-config.toml
 
-**Collection**
-- T1005 — Local data staging (no bulk file read or archive creation detection)
-- T1560 — Archive collected data (no zip/tar creation in staging paths)
-- T1113 — Screen capture (no screencapture process monitoring)
+### AI Layer
+explain_incident Tauri command builds structured prompt from incident data
+Calls Claude Haiku via Anthropic API (POST to /v1/messages)
+API key retrieved from macOS Keychain at call time
+Fully opt-in: nothing sent unless user clicks "Explain with AI" and has configured a key
+set_api_key, get_ai_configured Tauri commands
 
-**Command & Control — BIGGEST BLIND SPOT**
-- T1071 — Application layer protocol (NO network telemetry at all)
-- T1132 — Data encoding (no network payload inspection)
-
-**Exfiltration — BLIND**
-- T1041 — Exfiltration over C2 channel (no network monitoring)
-- T1567 — Exfiltration over web service (curl/wget posting undetected)
-- T1020 — Automated exfiltration (no scheduled upload detection)
-
-**Impact**
-- T1485 — Data destruction (no mass delete / shred command monitoring)
-- T1489 — Service stop (no launchctl stop or kill -9 on system processes)
+### Red Team Test Suite
+scripts/red_team_test.sh — 10 attack chains, safe, self-cleaning
+Usage: ./scripts/red_team_test.sh (interactive) | --quick (auto, 10s gaps) | --test N (single)
+Tests: Classic Dropper, Curl Pipe Bash, Persistence, Credential Access, System Recon, Data Staging + Exfil, Ransomware, Masquerading, Indicator Removal, Privilege Escalation
 
 ---
 
-## IMMEDIATE DEVELOPMENT PRIORITIES (Next Tranche)
+## RUNTIME CONFIGURATION (agent-config.toml)
 
-Work through these in order of impact. Each task should produce real, production-quality Rust code.
+```toml
+[policy]
+simulation_mode = true          # CHANGE TO false FOR REAL RESPONSES
+enable_process_kill = true
+enable_file_quarantine = true
+kill_threshold = 85
+quarantine_threshold = 75
+notification_cooldown_ms = 30000
+max_log_size_mb = 50
+max_log_files = 5
 
-### Priority 1 — Command Pattern Detection Engine
-Build a dedicated module for detecting LOLBin abuse and dangerous command patterns.
+[whitelist]
+trusted_process_paths = [
+    "/Users/danepadgett/.rustup/",
+    "/Users/danepadgett/.cargo/",
+    "/Users/danepadgett/.claude/",
+    "/Applications/",
+    "/usr/bin/",
+    "/usr/libexec/",
+    "/usr/sbin/",
+    "/System/"
+]
 
-Patterns to detect:
-- `curl <url> | bash` or `curl <url> | sh`
-- `wget <url> | bash`
-- `chmod +x <file> && ./<file>` sequences
-- `python -c '...'` inline execution
-- `osascript -e '...'` inline execution
-- `base64 --decode | bash`
-- `eval $(...)` patterns
-- LOLBins list: bash, sh, zsh, osascript, python, python3, ruby, perl, curl, wget, nc, ncat, openssl, sftp, scp, rsync, launchctl, PlistBuddy, xattr, ditto, tar, zip
+trusted_process_names = [
+    "cargo", "rustc", "rust-analyzer",
+    "node", "npm", "npx", "tsc", "vite", "esbuild",
+    "tauri", "git", "gh",
+    "python3", "pip3",
+    "brew", "make",
+    "zsh", "bash", "sh",
+    "claude"
+]
 
-Implementation guidance:
-- Parse process args at spawn time
-- Pattern match against a configurable rule set
-- Each rule should have: id, name, severity, confidence, mitre_technique_id
-- Produce: alert_lolbin_execution, alert_command_injection_pattern, alert_curl_pipe_bash
+trusted_app_bundle_paths = [
+    "/Applications/Xcode.app/",
+    "/Applications/Visual Studio Code.app/",
+    "/Applications/Cursor.app/",
+    "/Applications/iTerm.app/",
+    "/Applications/Terminal.app/",
+    "/Applications/Google Chrome.app/",
+    "/Applications/Safari.app/",
+    "/Applications/Firefox.app/",
+    "/Applications/zoom.us.app/",
+    "/Applications/Slack.app/"
+]
+```
 
-### Priority 2 — Network Telemetry (Critical Gap)
-This is the single highest-impact addition. Currently the agent is blind to all network activity.
+---
 
-What to build:
-- Monitor outbound connections per process (which pid → which IP:port)
-- Capture DNS queries where possible
-- Detect: process connecting immediately after download
-- Detect: interpreter/shell connecting to external IP
-- Detect: high-frequency connections (C2 beaconing pattern)
-- Correlate: file download origin IP with subsequent connection destination
+## CLI FLAGS
 
-Use `nettop`, `lsof -i`, or the Network Extension framework.
-Produce: telemetry_network_connection, alert_process_network_connection, alert_c2_beaconing_pattern
+```bash
+cargo run --bin core-agent              # Run the agent
+cargo run --bin core-agent -- --perf-report      # Print performance summary and exit
+cargo run --bin core-agent -- --list-whitelist   # Print current whitelist and exit
+cargo run --bin core-agent -- --clear-baseline   # Delete baseline.db and exit
+cargo run --bin watchdog                # Run the watchdog
+```
 
-### Priority 3 — Persistence Expansion
-Expand beyond LaunchAgents to cover the full macOS persistence surface.
+---
 
-Add monitoring for:
-- Login items via `sfltool` or ServiceManagement framework observation
-- Crontab modifications (`crontab -l` polling or file watch on /var/at/tabs/)
-- Login/logout hooks in com.apple.loginwindow defaults domain
-- Periodic scripts: /etc/periodic/daily|weekly|monthly
-- At jobs
-- Dock items with unusual paths
-- Spotlight importer plugins
+## KNOWN ISSUES / ACTIVE WORK
 
-Produce: alert_login_item_added, alert_crontab_modified, alert_login_hook_installed
+**Remaining before beta:**
 
-### Priority 4 — Keychain & Credential Access Detection
-High-value, relatively contained to implement.
+1. **False positive audit not yet completed** — The engine may be generating too many incidents from normal Mac activity. Need to run 24 hours of normal use, audit what fired, and tune thresholds. This is the #1 priority. Detection whitelist has been expanded (April 2026) to suppress: periodic, atrun, launchctl, mdutil, mdfind, mdworker_shared, mdworker, mds, mds_stores; and path prefixes: /usr/bin/crontab, /Users/*/Projects/Hound/. Incident threshold raised to 35 (from 20) to cut single-LOLBin false positives.
 
-What to detect:
-- `security` CLI invocations (find-generic-password, find-internet-password, dump-keychain)
-- Access to ~/Library/Keychains/ by non-system processes
-- Access to browser credential stores:
-  - ~/Library/Application Support/Google/Chrome/Default/Login Data
-  - ~/Library/Application Support/Firefox/Profiles/*/logins.json
-  - ~/Library/Cookies/
-- Processes reading ~/.ssh/id_* files
-- Processes reading ~/.aws/credentials
+2. **Performance test not yet completed** — `cargo run --bin core-agent -- --perf-report` after 24 hours of normal use. Need real CPU and memory numbers before putting this on anyone else's machine. Process monitor has been refactored (April 2026) to reuse a single `sysinfo::System` object across ticks, eliminating per-tick allocation overhead — expect improvement in process_monitor subsystem timing.
 
-Produce: alert_keychain_access_attempt, alert_browser_credential_access, alert_ssh_key_access
+3. **End-to-end fresh state test not done** — Need to delete all runtime/ files and confirm the UI and agent connect correctly on first launch with no prior state.
 
-### Priority 5 — Ransomware Behavioral Heuristics
-Improve the existing burst file activity detection into a proper ransomware detector.
+**Completed (April 2026):**
+- ✓ Onboarding flow: 5-screen Onboarding.tsx — permissions, privacy, health check — all wired up
+- ✓ Installer: scripts/build-installer.sh produces dist/Hound-0.1.0.dmg with install.sh + uninstall.sh
+- ✓ Menu bar tray icon: Open Hound / Quit menu, click-to-focus, ActivationPolicy::Accessory hides from Dock
+- ✓ check_permissions: now tries user-level TCC.db + Safari History.db (macOS 15 compatible)
+- ✓ Auth flow: Supabase sign-up/sign-in/skip wired in App.tsx; supabase.ts no longer throws on missing env vars
+- ✓ Detection whitelist: expanded with Spotlight/launchd processes; stale personal-cyber-platform path fixed everywhere
 
-Signals to add:
-- Rename wave: many files renamed with new extension in short window (e.g. .locked, .encrypted, .enc)
-- Extension replacement pattern: original extension disappears, new unknown extension appears
-- High-entropy write pattern: file content entropy increases significantly after modification
-- Staging directory: files being copied to a single directory rapidly
-- Shadow copy deletion: vssadmin, wmic, or equivalent macOS backup deletion
+**Known false positives (suppressed by detection whitelist):**
+- Claude Code sessions (zsh, cargo, rustc, npx) — suppressed via path prefix /Users/*/Projects/Hound/
+- Zoom updater (ZoomUpdater.app) — in suppressed_process_names
+- Apple Spotlight (mdfind, mdutil, mds, mdworker_shared) — in suppressed_process_names
+- launchctl, periodic, atrun — in suppressed_process_names
 
-Improve: alert_burst_file_activity → alert_ransomware_behavior_detected with sub-signals
+**Architecture gaps (post-beta):**
+- Network monitoring uses lsof polling (expensive, 250ms granularity) — future: Apple Network Extension framework
+- Command pattern matching uses string/regex — future: entropy + obfuscation analysis
+- No binary integrity checking at install time — future: hash verification against known-good
+- C2 over legitimate services (Telegram, Slack APIs) — future: process+network behavior combination
 
-### Priority 6 — Process Behavior Pattern Detection
-Detect unusual parent-child process relationships that indicate post-exploitation.
+---
 
-Patterns to detect:
-- Browser spawning shell (Chrome/Safari → bash/sh/python)
-- Office app spawning interpreter
-- System daemon spawning user-space executable from Downloads
-- Shell spawning network tool (bash → curl, bash → nc, bash → python with socket imports)
-- Process hollowing indicators (executable path vs mapped memory path mismatch)
-- Unusual process depth: chains longer than N interpreters deep
+## MITRE ATT&CK GAPS (requires System Extension — post-beta)
 
-Improve the existing process lineage tracking to score anomalous chains.
+These require kernel-level visibility not achievable from user space:
+- T1055 — Process injection (memory injection, dylib injection)
+- T1014 — Rootkits (by definition hidden from user space)
+- T1205 — Traffic signaling (deep packet inspection)
+- T1006 — Direct volume access (raw disk blocks)
 
-### Priority 7 — Masquerading Detection
-Easy win with high signal value.
-
-Detect:
-- Process name does not match its binary path (e.g. process named "Finder" running from ~/Downloads)
-- Known system binary names running from non-system paths
-- Double extensions: "invoice.pdf.sh", "photo.jpg.app"
-- Invisible characters in file/process names
-- Binary disguised as document (magic bytes mismatch with extension)
-
-Produce: alert_process_masquerading, alert_double_extension_execution
-
-### Priority 8 — Response Engine Hardening
-Evolve the response engine from simulation into production-readiness.
-
-Build:
-- Process tree kill (kill entire subtree, not just the triggering process)
-- Response cooldown timer (don't re-trigger response on same incident within N seconds)
-- Response audit log (every action taken, reason, timestamp, what was killed/quarantined)
-- Rollback capability (restore quarantined file with hash verification)
-- User notification hook (surface response action to UI layer)
-
-Keep simulation_mode as a config flag. Hardening means the non-simulation path is safe to enable.
-
-### Priority 9 — Incident Scoring Improvements
-Improve the correlation engine's confidence and severity model.
-
-Add:
-- Attack chain length bonus (longer chain = higher severity)
-- Signal co-occurrence weighting (some signal combinations are more suspicious than others)
-- Time-window correlation (signals within 30 seconds get grouped more aggressively)
-- Repeat offender penalty (same pid triggering multiple signals gets escalating score)
-- Baseline deviation (processes that have never done something before score higher)
-- MITRE technique tagging on each incident (which ATT&CK techniques are represented)
+User-space ceiling is ~95% meaningful coverage. The remaining 5% requires Apple Endpoint Security Framework.
 
 ---
 
 ## ARCHITECTURE PRINCIPLES
 
-When writing or modifying code, always respect these principles:
+**Safety first.** The guardrail system is load-bearing. Never weaken it. When in doubt, log and alert rather than act. A false negative (missed threat) is better than a false positive (killing a legitimate process).
 
-**Safety first.** The guardrail system is load-bearing. Never weaken it. When in doubt, log and alert rather than act. A false negative is better than killing a legitimate process.
+**Performance matters.** This runs continuously in the background. CPU and memory overhead must be minimal. The 50ms CPU budget per subsystem tick is a hard constraint.
 
-**Performance matters.** This runs continuously in the background on a user's Mac. CPU and memory overhead must be minimal. Use async where appropriate. Avoid blocking the main thread. Profile before optimizing but keep it in mind from the start.
+**Structured telemetry.** Every event must be serializable to JSONL. Consistent field names. Always include: timestamp, event_type, pid, parent_pid, path, severity, confidence, mitre_technique_id where applicable.
 
-**Structured telemetry.** Every event must be serializable to JSONL. Use consistent field names across event types. Include: timestamp, event_type, pid, parent_pid, path, severity, confidence, mitre_technique_id where applicable.
+**Modular detection.** Each detection function is independently testable. Sensors → Detections → Correlation → Response as distinct layers.
 
-**Modular detection.** Each detection rule should be independently testable. Detection logic should be separate from telemetry collection and from response. Think: sensors → detections → correlation → response as distinct layers.
+**Configurable everything.** Thresholds, severity weights, whitelist, simulation mode — all hot-reloadable from agent-config.toml without restart.
 
-**Configurable everything.** Thresholds, severity weights, guardrail lists, simulation mode — all should be configurable without recompiling. Use a config file (TOML preferred in Rust ecosystem).
+**Test coverage.** Every detection module has unit tests with positive cases (should detect) and negative cases (should not false-positive). Current: 165 tests, all passing.
 
-**Test coverage.** Each new detection module needs unit tests with both positive cases (should detect) and negative cases (should not false-positive on common safe behavior). Use real-world process names and paths in tests.
+**Log everything.** If something interesting happens and the right signal level is unclear, log it. Missing telemetry is permanent. Signals can be added later.
 
 ---
 
-## LONG-TERM ARCHITECTURE (Build Toward This)
+## LONG-TERM ARCHITECTURE
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -318,66 +469,76 @@ When writing or modifying code, always respect these principles:
                        │ raw telemetry events
 ┌──────────────────────▼──────────────────────────────┐
 │               DETECTION ENGINE                       │
-│  Atomic Rules | Command Patterns | LOLBin Detector   │
-│  Behavioral Heuristics | Entropy Analysis            │
+│  165 tests | ~95% MITRE coverage | Behavioral only   │
 └──────────────────────┬──────────────────────────────┘
                        │ atomic signals
 ┌──────────────────────▼──────────────────────────────┐
 │            CORRELATION ENGINE                        │
 │  Attack Chain Builder | Incident Scorer              │
-│  MITRE ATT&CK Tagger | Confidence Weighting          │
+│  MITRE Tagger | Confidence Weighting | Baseline      │
 └──────────────────────┬──────────────────────────────┘
                        │ incidents
 ┌──────────────────────▼──────────────────────────────┐
 │              RESPONSE ENGINE                         │
-│  Guardrails | Process Tree Kill | File Quarantine    │
-│  Cooldown Timers | Audit Log | Rollback              │
+│  Guardrails | Whitelist | Process Tree Kill          │
+│  File Quarantine | Cooldown | Audit Log | Rollback   │
 └──────────────────────┬──────────────────────────────┘
                        │
           ┌────────────┴────────────┐
           │                         │
 ┌─────────▼──────────┐   ┌─────────▼──────────┐
 │    AI LAYER         │   │     UI LAYER         │
-│  LLM Incident       │   │  Tauri + React       │
-│  Analyst            │   │  Desktop App         │
-│  Plain-English      │   │  Menubar Icon        │
-│  Explanations       │   │  Incident Timeline   │
-│  Threshold Tuning   │   │  Response Controls   │
+│  Deterministic      │   │  Tauri + React       │
+│  StoryLine          │   │  Inbox Model         │
+│  + Optional Claude  │   │  StoryLine View      │
+│  Haiku enhancement  │   │  History Tab         │
+│  via Keychain key   │   │  Burst Mode Banner   │
 └────────────────────┘   └────────────────────┘
 ```
 
-**AI Layer (integrate after deterministic engine is solid):**
-- LLM reads incident telemetry and explains what happened in plain English
-- "A process downloaded from Safari tried to execute a shell script that modified your login items. This matches a credential harvesting pattern. We blocked it."
-- LLM suggests new detection rules based on observed patterns
-- LLM acts as a triage assistant — this is the consumer-facing differentiator
+---
 
-**UI Layer (Tauri + React, in progress):**
-- Menubar icon with health indicator (green/yellow/red)
-- Incident feed with plain-English descriptions
-- Attack timeline visualization
-- Response action controls
-- Onboarding flow that builds user trust
+## ROADMAP TO BETA
+
+**Immediate (do before any new features):**
+1. ✓ Detection whitelist expanded, incident threshold tuned (April 2026)
+2. 24-hour performance test — `cargo run --bin core-agent -- --perf-report`
+3. False positive audit — what fires during normal daily use?
+
+**Required for beta:**
+4. ✓ Onboarding flow built (April 2026)
+5. ✓ Installer built: scripts/build-installer.sh → dist/Hound-0.1.0.dmg (April 2026)
+6. End-to-end fresh state test — delete runtime/ and verify clean start
+
+**Then:**
+7. Beta with 10-20 real users
+8. False positive feedback from real machines
+9. Apple notarization ($99 Apple Developer account)
+10. Auto-update infrastructure (Tauri updater)
 
 ---
 
 ## HOW TO WORK WITH ME
 
-1. **Before writing any code**, ask me to confirm the approach if you're unsure. Security code that does the wrong thing is worse than no code.
+1. **Before writing any code**, confirm the approach if unsure. Security code that does the wrong thing is worse than no code.
 
 2. **When adding a new detection**, always define:
    - What exact behavior triggers it
-   - What the false-positive risk is
-   - What guardrail conditions should suppress it
+   - What the false-positive risk is on a normal Mac
+   - What guardrail/whitelist conditions should suppress it
    - What MITRE ATT&CK technique it maps to
 
-3. **When modifying the response engine**, be extra cautious. Tag any change that affects whether a process gets killed or a file gets quarantined with a comment: `// RESPONSE IMPACT: explain what this changes`.
+3. **When modifying the response engine**, tag any change that affects kills or quarantines with: `// RESPONSE IMPACT: explain what this changes`
 
-4. **Prefer explicit over clever.** This is security software. A readable if-statement is better than a clever iterator chain that's hard to audit.
+4. **Simulation mode safety**: The agent defaults to simulation_mode=true on any config read error. Never change this default.
 
-5. **All new modules should have tests.** At minimum: one test that confirms detection fires on a known-bad pattern, one test that confirms it does NOT fire on a common safe pattern.
+5. **Prefer explicit over clever.** This is security software. A readable if-statement is better than a clever iterator chain that's hard to audit.
 
-6. **Log everything.** If something interesting happens and you're not sure whether to alert, log it anyway. We can add signal logic later. Missing telemetry is permanent.
+6. **All new modules need tests.** Minimum: one positive case (detects bad pattern) and one negative case (does not false-positive on common safe behavior). Use real-world process names and paths.
+
+7. **Log everything.** If uncertain about signal level, log it. Missing telemetry is permanent.
+
+8. **Performance budget.** No subsystem tick should exceed 50ms. Check perf-stats.jsonl after any significant change.
 
 ---
 
@@ -385,10 +546,9 @@ When writing or modifying code, always respect these principles:
 
 Start by reading the full codebase structure. Then:
 
-1. Identify the current state of the detection engine — what modules exist, how they're wired together, what the telemetry schema looks like.
+1. Check what the current state of the false positive audit is — has it been run? If not, that is the first priority.
+2. Check runtime/logs/perf-stats.jsonl — has a 24-hour performance test been run?
+3. Report the current state of the onboarding flow and installer.
+4. Then we'll pick the next task from the roadmap above.
 
-2. Tell me what you find: what's clean, what's fragile, what's missing, what needs refactoring before we build on top of it.
-
-3. Then we'll pick the first priority from the list above and build it together.
-
-Do not start writing code until you've read the codebase and reported back.
+Do not start writing new feature code until you've confirmed the audit and performance test status.

@@ -8,6 +8,10 @@ const LOG_DIR_RELATIVE: &str = "runtime/logs";
 const EVENT_LOG_RELATIVE: &str = "runtime/logs/agent-events.jsonl";
 const RESPONSE_AUDIT_LOG_RELATIVE: &str = "runtime/logs/response-audit.jsonl";
 
+/// Default rotation limits — overridden by agent-config.toml at runtime.
+const DEFAULT_MAX_LOG_SIZE_MB: u64 = 50;
+const DEFAULT_MAX_LOG_FILES: usize = 5;
+
 /// Resolve the project root directory.
 ///
 /// Resolution order:
@@ -66,6 +70,8 @@ pub fn response_audit_log_path() -> PathBuf {
 
 pub fn append_event(event: &TelemetryEvent) -> Result<()> {
     let path = log_file_path();
+    let (max_mb, max_files) = read_rotation_config();
+    check_and_rotate(&path, max_mb, max_files);
     append_jsonl_path(&path, event)
 }
 
@@ -105,4 +111,105 @@ fn ensure_log_dir() -> Result<()> {
     }
 
     Ok(())
+}
+
+// ── Log rotation ──────────────────────────────────────────────────────────────
+
+/// Read max_log_size_mb and max_log_files from agent-config.toml.
+/// Falls back to defaults if the config can't be read.
+fn read_rotation_config() -> (u64, usize) {
+    let config_path = resolve_project_root()
+        .join("runtime")
+        .join("agent-config.toml");
+
+    let Ok(contents) = std::fs::read_to_string(&config_path) else {
+        return (DEFAULT_MAX_LOG_SIZE_MB, DEFAULT_MAX_LOG_FILES);
+    };
+
+    let mut max_mb = DEFAULT_MAX_LOG_SIZE_MB;
+    let mut max_files = DEFAULT_MAX_LOG_FILES;
+
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("max_log_size_mb") {
+            let val = rest.trim().trim_start_matches('=').trim();
+            if let Ok(n) = val.parse::<u64>() {
+                max_mb = n;
+            }
+        } else if let Some(rest) = trimmed.strip_prefix("max_log_files") {
+            let val = rest.trim().trim_start_matches('=').trim();
+            if let Ok(n) = val.parse::<usize>() {
+                max_files = n;
+            }
+        }
+    }
+
+    (max_mb, max_files)
+}
+
+/// Rotate `path` if it exceeds `max_size_mb` megabytes.
+///
+/// Rotation scheme (standard log-rotate style):
+///   agent-events.jsonl.4 → deleted
+///   agent-events.jsonl.3 → agent-events.jsonl.4
+///   ...
+///   agent-events.jsonl.1 → agent-events.jsonl.2
+///   agent-events.jsonl   → agent-events.jsonl.1
+///   agent-events.jsonl   → (new empty file)
+///
+/// Non-fatal: any I/O errors during rotation are printed to stderr but do not
+/// propagate — the append that follows will create a new file if needed.
+fn check_and_rotate(path: &PathBuf, max_size_mb: u64, max_files: usize) {
+    let size_bytes = match std::fs::metadata(path) {
+        Ok(m) => m.len(),
+        Err(_) => return, // file doesn't exist yet — nothing to rotate
+    };
+
+    let limit_bytes = max_size_mb * 1024 * 1024;
+    if size_bytes <= limit_bytes {
+        return; // within limit
+    }
+
+    eprintln!(
+        "[core-agent] rotating {} ({} MB > {} MB limit)",
+        path.display(),
+        size_bytes / (1024 * 1024),
+        max_size_mb
+    );
+
+    // Delete the oldest rotated file if we're at the limit
+    if max_files > 0 {
+        let oldest = rotated_path(path, max_files);
+        if oldest.exists() {
+            let _ = std::fs::remove_file(&oldest);
+        }
+    }
+
+    // Shift existing rotated files: .N-1 → .N, ..., .1 → .2
+    for i in (1..max_files).rev() {
+        let src = rotated_path(path, i);
+        let dst = rotated_path(path, i + 1);
+        if src.exists() {
+            let _ = std::fs::rename(&src, &dst);
+        }
+    }
+
+    // Rename the active log to .1
+    let dst1 = rotated_path(path, 1);
+    if let Err(e) = std::fs::rename(path, &dst1) {
+        eprintln!("[core-agent] rotation rename failed: {e}");
+        return;
+    }
+
+    eprintln!(
+        "[core-agent] rotation complete: {} → {}",
+        path.display(),
+        dst1.display()
+    );
+}
+
+fn rotated_path(base: &PathBuf, n: usize) -> PathBuf {
+    let mut s = base.as_os_str().to_os_string();
+    s.push(format!(".{n}"));
+    PathBuf::from(s)
 }

@@ -91,6 +91,27 @@ export function parseBehavioralIncident(event: TelemetryEvent): BehavioralIncide
   const details = (typeof p.details === "object" && p.details !== null
     ? (p.details as Record<string, unknown>)
     : {});
+  const narrative = (typeof details.narrative === "object" && details.narrative !== null
+    ? (details.narrative as Record<string, unknown>)
+    : {});
+
+  // attack_chain_label lives in details.narrative.attack_chain_label
+  const attackChainLabel =
+    asString(narrative.attack_chain_label) ??
+    asString(p.attack_chain_label) ??
+    "Behavioral Incident";
+
+  // mitre_techniques live in details.mitre_techniques
+  const mitreTechniques =
+    asStringArray(details.mitre_techniques as unknown[]) ??
+    asStringArray(p.mitre_techniques as unknown[]) ??
+    [];
+
+  // timeline lives in details.timeline (array of step strings)
+  const timelineSteps =
+    asStringArray(details.timeline as unknown[]) ??
+    asStringArray(p.timeline_steps as unknown[]) ??
+    [];
 
   return {
     id: event.id,
@@ -100,20 +121,16 @@ export function parseBehavioralIncident(event: TelemetryEvent): BehavioralIncide
     score: asNumber(p.score) ?? 0,
     severity: normalizeSeverity(asString(p.severity)),
     confidence:
-      asString(p.confidence) ?? asString(details.confidence) ?? "unknown",
-    attack_chain_label:
-      asString(p.attack_chain_label) ?? "Behavioral Incident",
+      asString(details.confidence) ?? asString(p.confidence) ?? "unknown",
+    attack_chain_label: attackChainLabel,
     reason:
       asString(p.reason) ?? "Suspicious behavioral pattern detected",
     supporting_events:
-      asStringArray(p.supporting_events) ??
-      asStringArray(details.supporting_events) ??
+      asStringArray(details.supporting_events as unknown[]) ??
+      asStringArray(p.supporting_events as unknown[]) ??
       [],
-    timeline_steps:
-      asStringArray(p.timeline_steps) ??
-      asStringArray(details.timeline_steps) ??
-      [],
-    mitre_techniques: asStringArray(p.mitre_techniques) ?? [],
+    timeline_steps: timelineSteps,
+    mitre_techniques: mitreTechniques,
     primary_path:
       asString(details.primary_path) ?? asString(p.primary_path) ?? null,
     process_name: asString(details.process_name) ?? null,
