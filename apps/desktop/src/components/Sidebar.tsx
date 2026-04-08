@@ -14,7 +14,7 @@ type Props = {
 type IconProps = SVGProps<SVGSVGElement> & { size?: number };
 const NAV: Array<{ view: AppView; Icon: FC<IconProps>; label: string }> = [
   { view: "dashboard",  Icon: HomeIcon,     label: "Dashboard" },
-  { view: "incidents",  Icon: BellIcon,     label: "Incidents" },
+  { view: "incidents",  Icon: BellIcon,     label: "Traces" },
   { view: "dark-web",   Icon: EyeIcon,      label: "Dark Web" },
   { view: "history",    Icon: BookOpenIcon, label: "History" },
   { view: "account",    Icon: UserIcon,     label: "Account" },

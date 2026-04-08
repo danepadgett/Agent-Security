@@ -196,6 +196,121 @@ fn detect_rare_interpreter_execution(ctx: &DetectionContext) -> Vec<TelemetryEve
     alerts
 }
 
+/// Evaluate whether a specific process event (with optional file/network context)
+/// constitutes a scope violation given the execution source.
+/// Returns a TelemetryEvent if a violation is detected, None if execution is within scope.
+pub fn evaluate_scope_violation(
+    process: &ProcessInfo,
+    file_path: Option<&str>,
+    network_host: Option<&str>,
+    source: &crate::execution_context::ExecutionSource,
+    now: DateTime<Utc>,
+) -> Option<TelemetryEvent> {
+    use crate::execution_context::KNOWN_DEV_HOSTS;
+    let expected = source.expected_behaviors();
+
+    // Credential access: file path touches credential locations
+    if let Some(path) = file_path {
+        let cred_paths = [
+            "/.ssh/id_rsa", "/.ssh/id_ed25519", "/.ssh/id_ecdsa",
+            "/.aws/credentials", "/.aws/config",
+            "/.config/gcloud/credentials.db",
+            "/.kube/config",
+            "/Library/Keychains/login.keychain",
+        ];
+        for cred in &cred_paths {
+            if path.contains(cred) && !expected.may_access_credentials {
+                return Some(TelemetryEvent::new(
+                    now,
+                    "alert_scope_credential_access",
+                    "core-agent/scope-violation",
+                    json!({
+                        "severity": "critical",
+                        "category": "scope_violation",
+                        "violation_kind": "credential_access",
+                        "execution_source": source.as_str(),
+                        "reason": format!(
+                            "{} accessed a credential file it had no reason to touch.",
+                            source.display_name()
+                        ),
+                        "details": {
+                            "command": process.command,
+                            "pid": process.pid,
+                            "path": path,
+                            "mitre_technique_id": "T1552.004",
+                        }
+                    }),
+                ));
+            }
+        }
+
+        // Persistence installation: file written to startup paths
+        let persistence_paths = [
+            "/Library/LaunchAgents/",
+            "/Library/LaunchDaemons/",
+            "/Library/StartupItems/",
+        ];
+        for persist_path in &persistence_paths {
+            if path.contains(persist_path) && !expected.may_install_persistence {
+                return Some(TelemetryEvent::new(
+                    now,
+                    "alert_scope_persistence_install",
+                    "core-agent/scope-violation",
+                    json!({
+                        "severity": "critical",
+                        "category": "scope_violation",
+                        "violation_kind": "persistence_install",
+                        "execution_source": source.as_str(),
+                        "reason": format!(
+                            "{} installed a startup item without your permission.",
+                            source.display_name()
+                        ),
+                        "details": {
+                            "command": process.command,
+                            "pid": process.pid,
+                            "path": path,
+                            "mitre_technique_id": "T1543.001",
+                        }
+                    }),
+                ));
+            }
+        }
+    }
+
+    // Network connection to unknown host from a restricted source
+    if let Some(host) = network_host {
+        if expected.may_access_network {
+            let allowed = expected.allowed_network_hosts.iter().any(|h| host.contains(h));
+            let globally_safe = KNOWN_DEV_HOSTS.iter().any(|h| host.contains(h));
+            if !allowed && !globally_safe {
+                return Some(TelemetryEvent::new(
+                    now,
+                    "alert_scope_unexpected_network",
+                    "core-agent/scope-violation",
+                    json!({
+                        "severity": "notable",
+                        "category": "scope_violation",
+                        "violation_kind": "unexpected_network",
+                        "execution_source": source.as_str(),
+                        "reason": format!(
+                            "{} connected to an unfamiliar server: {}",
+                            source.display_name(), host
+                        ),
+                        "details": {
+                            "command": process.command,
+                            "pid": process.pid,
+                            "host": host,
+                            "mitre_technique_id": "T1071",
+                        }
+                    }),
+                ));
+            }
+        }
+    }
+
+    None
+}
+
 pub fn alert_fingerprint(event: &TelemetryEvent) -> String {
     let payload = &event.payload;
 

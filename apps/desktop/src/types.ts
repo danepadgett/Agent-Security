@@ -49,7 +49,41 @@ export type HoundTrace = {
   ai_enhanced: boolean;
 };
 
-export type ExecutionSource = "terminal" | "ide" | "ci" | "script" | "unknown";
+export type ExecutionSource =
+  | "claude_code"
+  | "cursor"
+  | "codex"
+  | "npm_install"
+  | "pip_install"
+  | "cargo_install"
+  | "terminal"
+  | "vscode_terminal"
+  | "script"
+  | "unknown";
+
+export type TraceVerdict = "clean" | "notable" | "critical";
+
+export interface NetworkActivity {
+  host: string;
+  port: number;
+  process: string;
+  is_known_safe: boolean;
+  label?: string;
+}
+
+export interface ScopeViolation {
+  type:
+    | "credential_access"
+    | "persistence_install"
+    | "unexpected_network"
+    | "privilege_escalation"
+    | "security_tool_tamper"
+    | "data_exfiltration";
+  severity: "notable" | "critical";
+  description: string;
+  technical: string;
+  blocked: boolean;
+}
 
 export type ExecutionTrace = {
   id: string;
@@ -57,7 +91,7 @@ export type ExecutionTrace = {
   command: string;
   args: string;
   source: ExecutionSource;
-  violation_kind: string | null; // null = clean execution
+  violation_kind: string | null;
   reason: string;
   headline: string;
 };

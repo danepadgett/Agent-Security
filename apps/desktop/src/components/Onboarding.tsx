@@ -340,7 +340,7 @@ function Screen2({ onNext, onBack }: { onNext: () => void; onBack: () => void })
         </div>
       </div>
       <p className="onboarding-how-desc">
-        Unlike traditional antivirus, Hound catches attacks it has never seen before.
+        Behavioral detection — Hound catches scope violations it has never seen before.
       </p>
       <div className="onboarding-nav">
         <button className="onboarding-btn onboarding-btn--ghost" onClick={onBack}>

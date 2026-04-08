@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>How Hound works — Behavioral EDR for macOS</title>
-<meta name="description" content="A behavioral endpoint detection and response agent for macOS. Built in Rust. No signatures. No cloud dependency. Designed to catch attacks that traditional antivirus misses.">
+<title>How Hound works — Execution visibility for developers</title>
+<meta name="description" content="A behavioral execution monitor for developers. Hound watches Claude Code, Cursor, install scripts, and terminal sessions — and tells you when something steps outside expected scope.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 52 52'><path d='M26 4L7 14v11c0 11.4 8.15 22.07 19.56 24.67C37.85 47.07 45 36.4 45 25V14L26 4z' fill='rgba(255,255,255,0.10)' stroke='%23ffffff' stroke-width='2.5' stroke-linejoin='round'/><path d='M19 26l5 5 9-9' stroke='%23ffffff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/></svg>">
 <style>
   :root {
@@ -409,9 +409,9 @@
 
 <!-- HERO -->
 <div class="docs-hero">
-  <p class="eyebrow">Architecture</p>
+  <p class="eyebrow">How it works</p>
   <h1>How Hound works.</h1>
-  <p>A behavioral endpoint detection and response agent for macOS. Built in Rust. No signatures. No cloud dependency. Designed to catch attacks that traditional antivirus misses.</p>
+  <p>A behavioral execution monitor for developers. Hound classifies every command by source — Claude Code, Cursor, npm install, terminal, script — and flags when behavior falls outside expected scope.</p>
 </div>
 
 <!-- DOCS LAYOUT -->
@@ -421,7 +421,7 @@
   <aside class="docs-sidebar">
     <div class="sidebar-label">On this page</div>
     <nav class="sidebar-links" aria-label="Page sections">
-      <a href="#signatures" class="sidebar-link">The problem with signatures</a>
+      <a href="#signatures" class="sidebar-link">The problem Hound solves</a>
       <a href="#behavioral" class="sidebar-link">Behavioral detection</a>
       <a href="#sensors" class="sidebar-link">Four sensor subsystems</a>
       <a href="#engine" class="sidebar-link">Detection engine</a>
@@ -436,6 +436,7 @@
     <!-- MOBILE PILL NAV -->
     <div class="mobile-section-nav" aria-label="Jump to section">
       <a href="#signatures">The problem</a>
+
       <a href="#behavioral">Behavioral detection</a>
       <a href="#sensors">Four sensors</a>
       <a href="#engine">Detection engine</a>
@@ -445,12 +446,12 @@
 
     <!-- SECTION 1 -->
     <section id="signatures">
-      <p class="section-eyebrow">The problem</p>
-      <h2 class="section-headline">Signatures can't catch what they've never seen.</h2>
+      <p class="section-eyebrow">The problem Hound solves</p>
+      <h2 class="section-headline">You run a lot of code you didn't write.</h2>
       <div class="section-body">
-        <p>Traditional antivirus works by comparing files against a database of known threats. If a file matches a signature, it's blocked. If it doesn't, it passes. This model worked reasonably well when malware moved slowly and attackers reused the same tools.</p>
-        <p>Modern attacks are different. Novel malware, living-off-the-land techniques, and obfuscated payloads evade signatures by design. By the time a signature database is updated to include a new threat, millions of machines may already be infected. Zero-day attacks, by definition, have no signatures.</p>
-        <p>The real question isn't "does this file look like malware?" &mdash; it's "is this process behaving like malware?" A curl command piped into bash is suspicious regardless of the URL. A file that becomes executable immediately after download is suspicious regardless of its name.</p>
+        <p>AI coding tools like Claude Code and Cursor generate hundreds of commands per session. Package managers execute postinstall scripts. Setup scripts from README files do whatever they want. Most of the time, everything is fine. But you have no way to know that — until now.</p>
+        <p>Traditional security tools ask "is this known malware?" That's the wrong question for developers. The question is: "is this consistent with what this workflow should be doing?" An <code>npm install</code> that reads <code>~/.ssh/id_rsa</code> isn't necessarily known malware — but it's absolutely outside expected scope.</p>
+        <p>Hound answers the right question. It knows what each execution source is supposed to do, and it tells you when something steps outside that. Clean installs and builds produce zero output. Scope violations produce a plain-English trace explaining exactly what happened and why it matters.</p>
       </div>
     </section>
 

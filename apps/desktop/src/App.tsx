@@ -11,6 +11,7 @@ import type {
   AppView,
   BehavioralIncident,
   HoundTrace,
+  ScopeViolation,
   TelemetryEvent,
 } from "./types";
 import { getTimestampMs, parseBehavioralIncident } from "./utils";
@@ -33,41 +34,69 @@ const BURST_WINDOW_MS = 10_000;
 const BURST_THRESHOLD = 5;
 const BURST_QUIET_MS = 15_000;
 
-// Scope violation chains that always warrant notification regardless of score.
-const ALWAYS_NOTIFY_CHAINS = new Set([
-  "credential_theft",
-  "curl_pipe_bash",
-  "download_and_execute",
-  "ransomware_attack",
-  "lateral_movement_chain",
-  "staging_and_exfil",
-  "persistence_installation",
-  "privilege_escalation_chain",
-  "supply_chain_compromise",
-]);
+// Per-context dedup: notable violations only notify once per context id.
+// Critical violations always notify.
+const notifiedContexts = new Set<string>();
 
-// Core philosophy: silence unless something actually matters.
-// Low-confidence behavioral_chain noise is suppressed; only genuine scope
-// violations (credential access, exfiltration, persistence, privilege escalation,
-// download-and-execute) produce notifications.
-function shouldNotify(incident: BehavioralIncident): boolean {
-  const score = incident.score ?? 0;
-  // Always notify on high-confidence violations in scope violation chains
-  if (ALWAYS_NOTIFY_CHAINS.has(incident.attack_chain_label)) return true;
-  // Suppress generic behavioral_chain below threshold — these fire on normal dev activity
-  if (incident.attack_chain_label === "behavioral_chain" && score < 50) return false;
-  // Notify on anything else that crosses the high-confidence bar
-  return score >= 50;
+function shouldNotify(violation: ScopeViolation, contextId: string): boolean {
+  if (violation.severity === "notable") {
+    if (notifiedContexts.has(contextId)) return false;
+    notifiedContexts.add(contextId);
+    return true;
+  }
+  if (violation.severity === "critical") return true;
+  return false;
 }
 
-function getNotificationText(incidents: BehavioralIncident[]): string {
-  if (incidents.length >= 3) {
-    return `${incidents.length} scope violations detected — review Incidents`;
+function getNotificationContent(
+  violation: ScopeViolation,
+  source: string
+): { title: string; body: string } {
+  const typeLabel = violation.type.replace(/_/g, " ");
+  if (violation.severity === "critical") {
+    return {
+      title: "Scope violation detected",
+      body: source ? `${typeLabel} — ${source}` : typeLabel,
+    };
   }
-  const inc = incidents[0];
-  const label = inc.attack_chain_label.replace(/_/g, " ");
-  const process = inc.process_name ?? inc.primary_path ?? null;
-  return process ? `${label} — ${process}` : label;
+  return {
+    title: "Execution trace",
+    body: source ? `${typeLabel} — ${source}` : typeLabel,
+  };
+}
+
+// Map a BehavioralIncident to a ScopeViolation for notification purposes.
+// Returns null if the incident should not produce a notification.
+const CRITICAL_CHAINS = new Set([
+  "ransomware_attack", "supply_chain_compromise", "lateral_movement_chain",
+  "credential_theft", "staging_and_exfil",
+]);
+const CHAIN_TO_VIOLATION_TYPE: Record<string, ScopeViolation["type"]> = {
+  credential_theft: "credential_access",
+  curl_pipe_bash: "unexpected_network",
+  download_and_execute: "unexpected_network",
+  ransomware_attack: "data_exfiltration",
+  lateral_movement_chain: "unexpected_network",
+  staging_and_exfil: "data_exfiltration",
+  persistence_installation: "persistence_install",
+  privilege_escalation_chain: "privilege_escalation",
+  supply_chain_compromise: "security_tool_tamper",
+};
+
+function incidentToViolation(incident: BehavioralIncident): ScopeViolation | null {
+  const score = incident.score ?? 0;
+  // Suppress low-confidence behavioral_chain — noise from normal dev activity
+  if (incident.attack_chain_label === "behavioral_chain" && score < 50) return null;
+  const violationType =
+    CHAIN_TO_VIOLATION_TYPE[incident.attack_chain_label] ?? "unexpected_network";
+  const isCritical = CRITICAL_CHAINS.has(incident.attack_chain_label) || score >= 70;
+  return {
+    type: violationType,
+    severity: isCritical ? "critical" : "notable",
+    description: incident.reason,
+    technical: incident.attack_chain_label,
+    blocked: incident.severity === "critical",
+  };
 }
 
 export default function App() {
@@ -220,12 +249,21 @@ export default function App() {
       setNewArrivalIds((s) => new Set([...s, ...newIds]));
 
       const now = Date.now();
-      const notifyArrivals = arrivals.filter(shouldNotify);
-      if (notifyArrivals.length > 0 && now - lastNotificationTime.current >= NOTIFICATION_COOLDOWN_MS) {
+      const toNotify = arrivals.filter((inc) => {
+        const violation = incidentToViolation(inc);
+        return violation !== null && shouldNotify(violation, inc.incident_key);
+      });
+      if (toNotify.length > 0 && now - lastNotificationTime.current >= NOTIFICATION_COOLDOWN_MS) {
+        const lead = toNotify[0];
+        const violation = incidentToViolation(lead)!;
+        const { title, body } =
+          toNotify.length >= 3
+            ? { title: "Scope violations detected", body: `${toNotify.length} execution traces — review Incidents` }
+            : getNotificationContent(violation, lead.process_name ?? lead.primary_path ?? lead.attack_chain_label.replace(/_/g, " "));
         const toastItem: ToastItem = {
           id: `toast-${++_toastSeq}`,
-          severity: notifyArrivals[0].severity,
-          title: getNotificationText(notifyArrivals),
+          severity: lead.severity,
+          title: body ? `${title}: ${body}` : title,
         };
         setToasts((t) => [...t, toastItem]);
         lastNotificationTime.current = now;

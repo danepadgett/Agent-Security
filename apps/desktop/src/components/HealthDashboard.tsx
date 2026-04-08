@@ -86,10 +86,10 @@ export function HealthDashboard({ events, incidents, agentStatus, onToggleSimMod
 
       {/* 24-hour bar chart */}
       <div className="health-section">
-        <div className="health-section-label">Incidents — last 24 hours</div>
+        <div className="health-section-label">Traces — last 24 hours</div>
         <div className="bar-chart">
           {stats.hourBuckets.map((count, i) => (
-            <div key={i} className="bar-col" title={`${count} incident${count !== 1 ? "s" : ""}`}>
+            <div key={i} className="bar-col" title={`${count} trace${count !== 1 ? "s" : ""}`}>
               <div
                 className="bar"
                 style={{ height: `${(count / maxHour) * 100}%` }}

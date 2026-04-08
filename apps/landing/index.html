@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hound — Execution visibility for developers</title>
-<meta name="description" content="Hound gives developers complete visibility into what their tools actually do. Silence for clean builds. Instant alerts for credential access, unexpected network calls, and scope violations.">
+<meta name="description" content="See exactly what the code you run is actually doing. Hound watches Claude Code, Cursor, install scripts, and terminal sessions — and tells you when something steps outside expected scope.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 52 52'><path d='M26 4L7 14v11c0 11.4 8.15 22.07 19.56 24.67C37.85 47.07 45 36.4 45 25V14L26 4z' fill='rgba(255,255,255,0.10)' stroke='%23ffffff' stroke-width='2.5' stroke-linejoin='round'/><path d='M19 26l5 5 9-9' stroke='%23ffffff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/></svg>">
 <style>
   :root {
@@ -17,10 +17,12 @@
     --text: #ffffff;
     --muted: #8b949e;
     --faint: #4b5563;
+    --green: #22c55e;
+    --green-dim: rgba(34,197,94,0.10);
+    --amber: #f59e0b;
+    --amber-dim: rgba(245,158,11,0.12);
     --red: #ef4444;
     --red-dim: rgba(239,68,68,0.10);
-    --amber: #f59e0b;
-    --amber-dim: rgba(245,158,11,0.10);
   }
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html { scroll-behavior: smooth; }
@@ -185,7 +187,7 @@
   }
   .hero-centered {
     text-align: center;
-    max-width: 720px;
+    max-width: 760px;
     margin: 0 auto;
     padding: 80px 0 64px;
   }
@@ -197,62 +199,30 @@
     margin-bottom: 24px;
     color: #fff;
   }
-  .hero-centered p {
-    font-size: 18px;
-    color: var(--muted);
-    line-height: 1.65;
-    margin-bottom: 36px;
-  }
-  .hero-buttons { justify-content: center; }
-  @media (max-width: 768px) {
+  @media (max-width: 640px) {
     .hero-centered h1 { font-size: 38px; }
-    .hero-centered p { font-size: 16px; }
+    .section-title { font-size: 30px; }
   }
-  .badge-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    border: 1px solid var(--border-md);
-    border-radius: 100px;
-    padding: 5px 14px;
-    font-size: 12px;
+  .hero-sub {
+    font-size: 20px;
     color: var(--muted);
-    margin-bottom: 28px;
+    line-height: 1.6;
+    margin-bottom: 40px;
+    max-width: 580px;
+    margin-left: auto;
+    margin-right: auto;
   }
-  .badge-pill .dot {
-    width: 5px; height: 5px;
-    border-radius: 50%;
-    background: var(--muted);
-  }
-  .hero-left h1 {
-    font-size: 54px;
-    font-weight: 800;
-    letter-spacing: -0.03em;
-    line-height: 1.08;
-    margin-bottom: 24px;
-    color: #fff;
-  }
-  .hero-left p {
-    font-size: 18px;
-    color: var(--muted);
-    max-width: 460px;
-    line-height: 1.65;
-    margin-bottom: 36px;
-  }
-  .hero-buttons {
+  .hero-actions {
     display: flex;
     gap: 12px;
+    justify-content: center;
     flex-wrap: wrap;
-    margin-bottom: 20px;
   }
-  .hero-fine { font-size: 12px; color: var(--faint); }
-
-  /* BUTTONS */
   .btn-primary {
     background: #fff;
     color: #0f1117;
     height: 48px;
-    padding: 0 24px;
+    padding: 0 28px;
     border-radius: 10px;
     font-size: 15px;
     font-weight: 700;
@@ -269,7 +239,7 @@
     background: transparent;
     color: var(--muted);
     height: 48px;
-    padding: 0 24px;
+    padding: 0 28px;
     border-radius: 10px;
     font-size: 15px;
     font-weight: 600;
@@ -277,819 +247,704 @@
     cursor: pointer;
     display: inline-flex;
     align-items: center;
+    gap: 8px;
     transition: color 0.15s, border-color 0.15s;
     text-decoration: none;
   }
-  .btn-ghost:hover { color: #fff; border-color: rgba(255,255,255,0.25); }
-  .cta-row {
-    display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
-    margin-top: 48px;
-    justify-content: center;
-  }
-
-  /* BACKGROUNDS */
-  .bg2 { background: var(--bg2); }
-  .bg-deep { background: var(--bg-deep); }
-
-  /* PROTECTION LIST */
-  .protection-list {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0 64px;
-    margin-top: 48px;
-  }
-  @media (max-width: 768px) { .protection-list { grid-template-columns: 1fr; } }
-  .protection-col {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-  }
-  .protection-col li {
-    font-size: 15px;
-    color: var(--muted);
-    padding: 14px 0;
-    border-bottom: 1px solid var(--border);
-    line-height: 1.5;
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-  }
-  .protection-col li::before {
-    content: '';
-    width: 4px;
-    height: 4px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.3);
-    flex-shrink: 0;
-    margin-top: 9px;
-  }
-  .protection-footnote {
+  .btn-ghost:hover { color: #fff; border-color: rgba(255,255,255,0.3); }
+  .platform-note {
+    margin-top: 20px;
     font-size: 13px;
     color: var(--faint);
-    margin-top: 36px;
-    text-align: center;
   }
 
-  /* TERMINAL DEMO */
-  .terminal-wrap {
-    background: var(--bg-deep);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    overflow: hidden;
-    margin-top: 48px;
-    max-width: 760px;
-    margin-left: auto;
-    margin-right: auto;
-  }
-  .terminal-bar {
-    background: var(--bg3);
-    border-bottom: 1px solid var(--border);
-    padding: 10px 16px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .terminal-dots { display: flex; gap: 6px; }
-  .terminal-dot { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,0.08); }
-  .terminal-title { font-size: 11px; color: var(--faint); font-family: monospace; flex: 1; text-align: center; }
-  .terminal-body {
-    padding: 20px 24px;
-    font-family: monospace;
-    font-size: 12px;
-    line-height: 2;
-    min-height: 200px;
-    color: var(--muted);
-  }
-  .terminal-line { display: block; }
-  .terminal-line .ts { color: var(--faint); user-select: none; }
-  .terminal-line .ev { color: var(--muted); }
-  .terminal-line .path { color: rgba(255,255,255,0.5); }
-  .terminal-line.alert-line .ev { color: var(--amber); }
-  .terminal-line.block-line .ev { color: #fff; font-weight: 700; }
-  .terminal-cursor {
-    display: inline-block;
-    width: 7px; height: 14px;
-    background: rgba(255,255,255,0.5);
-    vertical-align: text-bottom;
-    animation: blink 1s step-end infinite;
-  }
-  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-
-  /* STORYLINE SECTION */
-  .two-col {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 72px;
-    align-items: center;
-  }
-  @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; gap: 40px; } }
-  .hound-trace-card {
-    background: var(--bg3);
-    border: 1px solid var(--border);
-    border-left: 3px solid #fff;
-    border-radius: 14px;
-    padding: 24px;
-  }
-  .hound-trace-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 14px;
-    flex-wrap: wrap;
-  }
-  .badge-amber {
-    background: var(--amber-dim);
-    color: var(--amber);
-    border: 1px solid rgba(245,158,11,0.3);
-    border-radius: 6px;
-    padding: 3px 8px;
-    font-size: 11px;
-    font-weight: 600;
-  }
-  .badge-red {
-    background: var(--red-dim);
-    color: var(--red);
-    border: 1px solid rgba(239,68,68,0.3);
-    border-radius: 6px;
-    padding: 3px 8px;
-    font-size: 11px;
-    font-weight: 700;
-  }
-  .badge-time { margin-left: auto; font-size: 12px; color: var(--muted); }
-  .hound-trace-card h4 { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 16px; }
-  .hound-trace-divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
-  .hound-trace-block { margin-bottom: 14px; }
-  .hound-trace-label {
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--faint);
-    margin-bottom: 4px;
-  }
-  .hound-trace-block p { font-size: 13px; color: var(--muted); line-height: 1.6; }
-  .mitre-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
-  .mitre-tag {
-    font-size: 10px;
-    font-family: monospace;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 3px 7px;
-    color: var(--faint);
-  }
-
-  /* TIMELINE */
-  .incident-timeline {
-    margin-top: 16px;
-    position: relative;
-  }
-  .timeline-item {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    padding-bottom: 14px;
-    position: relative;
-    opacity: 0;
-    animation: fadeUp 0.4s ease forwards;
-  }
-  .timeline-item:nth-child(1) { animation-delay: 0.3s; }
-  .timeline-item:nth-child(2) { animation-delay: 0.7s; }
-  .timeline-item:nth-child(3) { animation-delay: 1.1s; }
-  .timeline-item:nth-child(4) { animation-delay: 1.5s; }
-  .timeline-item:nth-child(5) { animation-delay: 1.9s; }
-  .timeline-item:nth-child(6) { animation-delay: 2.3s; }
-  @keyframes fadeUp {
-    from { opacity: 0; transform: translateY(6px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  .timeline-dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: var(--faint);
-    flex-shrink: 0;
-    margin-top: 5px;
-    position: relative;
-    z-index: 1;
-  }
-  .timeline-item.threat .timeline-dot { background: var(--red); }
-  .timeline-item.blocked .timeline-dot { background: #fff; }
-  .timeline-item:not(:last-child) .timeline-dot::after {
-    content: '';
-    position: absolute;
-    left: 3px; top: 8px;
-    width: 1px; height: calc(100% + 6px);
-    background: var(--border);
-  }
-  .timeline-text { font-size: 12px; color: var(--muted); line-height: 1.5; }
-  .timeline-text .ts { color: var(--faint); font-family: monospace; font-size: 11px; margin-right: 6px; }
-  .timeline-item.threat .timeline-text { color: var(--amber); }
-  .timeline-item.blocked .timeline-text { color: #fff; font-weight: 600; }
-
-  /* COMPARISON */
-  .comparison-grid {
+  /* SCENARIO CARDS */
+  .scenario-section { background: var(--bg2); }
+  .scenario-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 16px;
     margin-top: 48px;
   }
-  @media (max-width: 900px) { .comparison-grid { grid-template-columns: 1fr; } }
-  .comparison-card {
-    background: var(--bg2);
+  @media (max-width: 900px) {
+    .scenario-grid { grid-template-columns: 1fr; }
+  }
+  .scenario-card {
+    background: var(--bg3);
     border: 1px solid var(--border);
     border-radius: 14px;
     padding: 28px;
-    transition: border-color 0.2s;
   }
-  .comparison-card:hover { border-color: rgba(255,255,255,0.16); }
-  .comparison-card .label {
+  .scenario-tag {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+  .scenario-title {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 10px;
+    color: #fff;
+  }
+  .scenario-body {
+    font-size: 14px;
+    color: var(--muted);
+    line-height: 1.6;
+    margin-bottom: 20px;
+  }
+  .scenario-trace {
+    background: var(--bg-deep);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    font-size: 12px;
+    font-family: "SF Mono", "Fira Code", ui-monospace, monospace;
+  }
+  .trace-label {
     font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .trace-label.clean { color: var(--green); }
+  .trace-label.notable { color: var(--amber); }
+  .trace-text { color: var(--muted); line-height: 1.5; }
+  .trace-text strong { color: #fff; }
+
+  /* TRACE SHOWCASE */
+  .trace-showcase-section { background: var(--bg-deep); }
+  .trace-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-top: 48px;
+  }
+  @media (max-width: 800px) {
+    .trace-cards { grid-template-columns: 1fr; }
+  }
+  .trace-card {
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .trace-card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+  }
+  .trace-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .trace-dot.clean { background: var(--green); }
+  .trace-dot.notable { background: var(--amber); }
+  .trace-card-title { font-size: 13px; font-weight: 600; flex: 1; }
+  .trace-badge {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 5px;
+  }
+  .trace-badge.clean { background: var(--green-dim); color: var(--green); }
+  .trace-badge.notable { background: var(--amber-dim); color: var(--amber); }
+  .trace-card-body { padding: 18px; background: var(--bg3); }
+  .trace-field { margin-bottom: 14px; }
+  .trace-field:last-child { margin-bottom: 0; }
+  .trace-field-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin-bottom: 4px;
+  }
+  .trace-field-value {
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+  .trace-field-value strong { color: #fff; }
+  .trace-field-value code {
+    font-family: "SF Mono", "Fira Code", ui-monospace, monospace;
+    font-size: 12px;
+    background: var(--bg-deep);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: #e2e8f0;
+  }
+
+  /* HOW IT WORKS */
+  .how-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 32px;
+    margin-top: 48px;
+  }
+  @media (max-width: 768px) {
+    .how-grid { grid-template-columns: 1fr; gap: 24px; }
+  }
+  .how-step { }
+  .how-number {
+    font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--faint);
     margin-bottom: 12px;
   }
-  .comparison-card h3 { font-size: 17px; font-weight: 700; color: #fff; margin-bottom: 10px; line-height: 1.3; }
-  .comparison-card p { font-size: 14px; color: var(--muted); line-height: 1.65; }
+  .how-title {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 10px;
+  }
+  .how-body {
+    font-size: 15px;
+    color: var(--muted);
+    line-height: 1.65;
+  }
 
-  /* STEPS */
-  .steps-list {
-    max-width: 640px;
-    margin: 56px auto 0;
-    position: relative;
-  }
-  .step {
-    display: flex;
-    gap: 24px;
-    padding-bottom: 40px;
-    position: relative;
-  }
-  .step:last-child { padding-bottom: 0; }
-  .step:not(:last-child)::after {
-    content: '';
-    position: absolute;
-    left: 24px; top: 52px;
-    bottom: 0; width: 1px;
-    background: var(--border);
-  }
-  .step-num {
-    font-size: 48px;
-    font-weight: 800;
-    color: #fff;
-    opacity: 0.12;
-    line-height: 1;
-    min-width: 50px;
-    text-align: center;
-    flex-shrink: 0;
-    padding-top: 2px;
-  }
-  .step-content h3 { font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 8px; margin-top: 6px; }
-  .step-content p { font-size: 15px; color: var(--muted); line-height: 1.65; }
-  .step-meta { font-family: monospace; font-size: 12px; color: var(--faint); margin-top: 10px; }
-
-  /* TRUST */
-  .trust-grid {
+  /* COMPARISON */
+  .comparison-section { background: var(--bg2); }
+  .comparison-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 16px;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
     margin-top: 48px;
   }
-  @media (max-width: 768px) { .trust-grid { grid-template-columns: 1fr; } }
-  .trust-card {
-    background: var(--bg3);
-    border: 1px solid var(--border);
+  @media (max-width: 700px) {
+    .comparison-grid { grid-template-columns: 1fr; }
+  }
+  .comparison-card {
     border-radius: 14px;
+    border: 1px solid var(--border);
     padding: 28px;
   }
-  .trust-card h3 { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 10px; }
-  .trust-card p { font-size: 14px; color: var(--muted); line-height: 1.65; }
+  .comparison-card.theirs { background: var(--bg3); }
+  .comparison-card.ours { background: var(--bg3); border-color: var(--border-md); }
+  .comparison-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin-bottom: 14px;
+  }
+  .comparison-card.ours .comparison-label { color: rgba(255,255,255,0.4); }
+  .comparison-card h3 {
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 16px;
+  }
+  .comparison-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .comparison-list li {
+    font-size: 14px;
+    color: var(--muted);
+    padding-left: 20px;
+    position: relative;
+    line-height: 1.5;
+  }
+  .comparison-list li::before {
+    content: "–";
+    position: absolute;
+    left: 0;
+    color: var(--faint);
+  }
+  .comparison-card.ours .comparison-list li::before { content: "+"; color: var(--green); }
+  .comparison-card.ours .comparison-list li { color: #e2e8f0; }
 
   /* FAQ */
-  .faq-list { max-width: 680px; margin: 48px auto 0; }
-  .faq-item { border-bottom: 1px solid var(--border); }
+  .faq-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin-top: 48px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .faq-item {
+    border-bottom: 1px solid var(--border);
+  }
+  .faq-item:last-child { border-bottom: none; }
   .faq-q {
     width: 100%;
     background: none;
     border: none;
     text-align: left;
-    padding: 20px 0;
-    font-size: 16px;
-    font-weight: 600;
     color: #fff;
+    font-size: 15px;
+    font-weight: 600;
+    padding: 20px 24px;
     cursor: pointer;
     display: flex;
-    align-items: center;
     justify-content: space-between;
-    gap: 16px;
+    align-items: center;
+    gap: 12px;
   }
-  .faq-q:hover { color: #fff; }
-  .faq-indicator {
-    font-size: 18px;
-    color: var(--faint);
-    transition: transform 0.2s;
+  .faq-q:hover { background: rgba(255,255,255,0.02); }
+  .faq-chevron {
     flex-shrink: 0;
+    transition: transform 0.2s;
+    color: var(--faint);
   }
-  .faq-item.open .faq-indicator { transform: rotate(45deg); }
+  .faq-item.open .faq-chevron { transform: rotate(180deg); }
   .faq-a {
-    max-height: 0;
-    overflow: hidden;
-    transition: max-height 0.3s ease;
-  }
-  .faq-item.open .faq-a { max-height: 300px; }
-  .faq-a p {
-    font-size: 15px;
+    display: none;
+    padding: 0 24px 20px;
+    font-size: 14px;
     color: var(--muted);
     line-height: 1.7;
-    padding-bottom: 20px;
   }
+  .faq-item.open .faq-a { display: block; }
 
   /* FOOTER */
   footer {
-    background: var(--bg2);
     border-top: 1px solid var(--border);
-    padding: 40px 32px 24px;
+    padding: 40px 0;
+    text-align: center;
   }
-  .footer-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 32px;
-    max-width: 1100px;
-    margin: 0 auto 32px;
+  .footer-brand {
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 12px;
   }
-  .footer-brand { display: flex; flex-direction: column; gap: 8px; }
-  .footer-brand-row { display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 700; }
-  .footer-brand-tag { font-size: 12px; color: var(--muted); line-height: 1.5; }
-  .footer-nav { display: flex; flex-direction: column; gap: 10px; }
-  .footer-nav a { font-size: 13px; color: var(--muted); transition: color 0.15s; }
-  .footer-nav a:hover { color: #fff; }
-  .footer-tech { font-size: 13px; color: var(--muted); text-align: right; line-height: 1.6; }
-  .footer-bottom {
-    max-width: 1100px;
-    margin: 0 auto;
-    padding-top: 20px;
-    border-top: 1px solid var(--border);
+  .footer-links {
     display: flex;
-    gap: 20px;
+    gap: 24px;
+    justify-content: center;
+    margin-bottom: 16px;
     flex-wrap: wrap;
-    justify-content: space-between;
   }
-  .footer-bottom span { font-size: 11px; color: var(--faint); }
-  @media (max-width: 768px) {
-    .footer-grid { grid-template-columns: 1fr; text-align: center; }
-    .footer-brand { align-items: center; }
-    .footer-brand-row { justify-content: center; }
-    .footer-nav { align-items: center; }
-    .footer-tech { text-align: center; }
-    .footer-bottom { justify-content: center; }
-  }
+  .footer-links a { font-size: 13px; color: var(--muted); }
+  .footer-links a:hover { color: #fff; }
+  .footer-copy { font-size: 13px; color: var(--faint); }
 </style>
 </head>
 <body>
 
-<div id="progress" role="progressbar" aria-hidden="true"></div>
+<div id="progress"></div>
 
-<!-- NAV -->
-<nav id="main-nav">
-  <a href="./index.html" class="nav-brand">
-    <svg width="20" height="20" viewBox="0 0 52 52" fill="none" aria-hidden="true">
+<nav id="nav">
+  <a class="nav-brand" href="/">
+    <svg width="20" height="20" viewBox="0 0 52 52" fill="none">
       <path d="M26 4L7 14v11c0 11.4 8.15 22.07 19.56 24.67C37.85 47.07 45 36.4 45 25V14L26 4z" fill="rgba(255,255,255,0.10)" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"/>
       <path d="M19 26l5 5 9-9" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>
     Hound
   </a>
   <div class="nav-links">
-    <a href="./how-it-works.html">How it works</a>
-    <a href="./detection.html">Detection</a>
-    <a href="./download.html">Download</a>
+    <a href="how-it-works.html">How it works</a>
+    <a href="detection.html">Detection</a>
+    <a href="#faq">FAQ</a>
   </div>
   <div class="nav-right">
-    <a href="./download.html" class="btn-nav">Download</a>
-    <button class="hamburger" id="nav-toggle" aria-label="Open menu">
-      <span></span><span></span><span></span>
-    </button>
+    <a class="btn-nav" href="download.html">Download free</a>
   </div>
+  <button class="hamburger" onclick="document.getElementById('nav-menu').classList.toggle('open')" aria-label="Menu">
+    <span></span><span></span><span></span>
+  </button>
 </nav>
-<div id="nav-menu" aria-label="Mobile navigation">
-  <a href="./how-it-works.html">How it works</a>
-  <a href="./detection.html">Detection</a>
-  <a href="./download.html">Download</a>
+
+<div id="nav-menu">
+  <a href="how-it-works.html">How it works</a>
+  <a href="detection.html">Detection</a>
+  <a href="#faq">FAQ</a>
+  <a href="download.html">Download free</a>
 </div>
 
 <!-- HERO -->
 <section class="hero">
   <div class="container">
-    <div class="hero-centered">
-      <div class="badge-pill">
-        <span class="dot"></span>
-        Free &middot; Local-first &middot; Silent by default
-      </div>
-      <h1>See exactly what your tools do.</h1>
-      <p>Hound gives developers complete execution visibility. Silence for clean builds. Instant alerts when a dependency touches credentials, phones home unexpectedly, or installs a persistence hook. No noise. No cloud. No subscription.</p>
-      <div class="hero-buttons">
-        <a href="./download.html" class="btn-primary">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M12 3v13M6 11l6 6 6-6" stroke="#0f1117" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M4 20h16" stroke="#0f1117" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-          Download for macOS
+    <div class="hero-centered reveal">
+      <p class="eyebrow">Execution visibility for developers</p>
+      <h1>See exactly what the code you run is actually doing.</h1>
+      <p class="hero-sub">
+        Claude Code, Cursor, install scripts, terminal sessions.
+        Hound watches them all and tells you when something steps outside expected scope.
+        No noise. No configuration. Just clarity.
+      </p>
+      <div class="hero-actions">
+        <a class="btn-primary" href="download.html">
+          Download for Mac — free
         </a>
-        <a href="./how-it-works.html" class="btn-ghost">How it works</a>
+        <a class="btn-ghost" href="how-it-works.html">
+          How it works →
+        </a>
       </div>
-      <p class="hero-fine">macOS 12 Monterey or later &middot; Apple Silicon + Intel</p>
+      <p class="platform-note">macOS 13+ · Local-first · No cloud required</p>
     </div>
   </div>
 </section>
 
-<!-- WHAT HOUND PROTECTS AGAINST -->
-<section class="bg2">
+<!-- SCENARIOS -->
+<section class="scenario-section">
   <div class="container">
-    <p class="eyebrow reveal">Scope violations</p>
-    <h2 class="section-title reveal">What Hound watches for.</h2>
-    <p class="section-sub reveal">Silence for clean builds. Alerts only when something steps outside expected scope — credential access, unexpected network, persistence install, or privilege escalation.</p>
-    <div class="protection-list">
-      <ul class="protection-col reveal">
-        <li>npm postinstall scripts that make outbound network calls</li>
-        <li>Dependencies accessing ~/.ssh, ~/.aws, or ~/.kube</li>
-        <li>Build tools installing LaunchAgent persistence</li>
-        <li>Scripts that download and execute in a single command</li>
-        <li>Processes touching browser credentials or the Keychain</li>
-        <li>Files exfiltrated to S3, GCS, or unknown endpoints</li>
-        <li>Package names that typosquat popular libraries</li>
-      </ul>
-      <ul class="protection-col reveal">
-        <li>curl | bash patterns from CI or test runners</li>
-        <li>Interpreters making raw inline network calls</li>
-        <li>Login hooks and crontab modifications</li>
-        <li>Security software being disabled or tampered with</li>
-        <li>SSH key access and lateral movement attempts</li>
-        <li>Commands piped directly into a shell interpreter</li>
-        <li>Boot security configuration being modified</li>
-      </ul>
-    </div>
-    <p class="protection-footnote reveal">Hound watches execution behavior, not known signatures. It catches supply chain attacks that no antivirus has seen before.</p>
-  </div>
-</section>
+    <p class="eyebrow reveal">What Hound watches</p>
+    <h2 class="section-title reveal">You run a lot of code you didn't write.</h2>
+    <p class="section-sub reveal">
+      AI coding tools generate hundreds of commands per session.
+      Package installers run postinstall scripts you've never seen.
+      Setup scripts from README files do whatever they want.
+      Hound tells you what actually happened.
+    </p>
 
-<!-- LIVE INCIDENT DEMO -->
-<section class="bg-deep">
-  <div class="container">
-    <p class="eyebrow reveal" style="text-align:center;">Live detection</p>
-    <h2 class="section-title reveal" style="text-align:center;">Watch it catch an attack in real time.</h2>
-    <p class="section-sub reveal" style="text-align:center;margin-left:auto;margin-right:auto;">A downloaded file disguises itself as a PDF, gets marked executable, spawns a process, and phones home. Hound correlates all of it into a single incident and blocks it.</p>
-    <div class="terminal-wrap reveal">
-      <div class="terminal-bar">
-        <div class="terminal-dots">
-          <div class="terminal-dot"></div>
-          <div class="terminal-dot"></div>
-          <div class="terminal-dot"></div>
+    <div class="scenario-grid">
+      <div class="scenario-card reveal">
+        <p class="scenario-tag">Claude Code · Cursor · Codex</p>
+        <h3 class="scenario-title">An AI tool built your feature.</h3>
+        <p class="scenario-body">
+          It compiled, tested, ran migrations, made git commits.
+          Was that all it did?
+        </p>
+        <div class="scenario-trace">
+          <p class="trace-label clean">Hound trace — clean</p>
+          <p class="trace-text">
+            <strong>claude_code</strong> ran 47 commands over 12 minutes.<br>
+            All writes within project directory.<br>
+            No credential access. No unexpected network. Nothing outside scope.
+          </p>
         </div>
-        <div class="terminal-title">agent-events.jsonl &mdash; live</div>
       </div>
-      <div class="terminal-body" id="terminal-body">
-        <span class="terminal-cursor" id="term-cursor"></span>
+
+      <div class="scenario-card reveal">
+        <p class="scenario-tag">npm install · pip install · cargo add</p>
+        <h3 class="scenario-title">You installed a package from a README.</h3>
+        <p class="scenario-body">
+          Package managers run postinstall scripts. Most are fine.
+          Some aren't. Hound watches the difference.
+        </p>
+        <div class="scenario-trace">
+          <p class="trace-label notable">Hound trace — notable</p>
+          <p class="trace-text">
+            <strong>postinstall.sh</strong> read <code>~/.ssh/id_rsa</code><br>
+            Expected: write to node_modules/<br>
+            Got: credential file access
+          </p>
+        </div>
+      </div>
+
+      <div class="scenario-card reveal">
+        <p class="scenario-tag">Setup scripts · curl | bash</p>
+        <h3 class="scenario-title">A setup script ran from your terminal.</h3>
+        <p class="scenario-body">
+          It installed dependencies, set environment variables.
+          Did it also install a LaunchAgent? Hound knows.
+        </p>
+        <div class="scenario-trace">
+          <p class="trace-label notable">Hound trace — notable</p>
+          <p class="trace-text">
+            <strong>install.sh</strong> wrote to <code>~/Library/LaunchAgents/</code><br>
+            Persistence artifact created.<br>
+            This is outside expected scope for a setup script.
+          </p>
+        </div>
       </div>
     </div>
   </div>
 </section>
 
-<!-- HOUND TRACE -->
+<!-- TRACE SHOWCASE -->
+<section class="trace-showcase-section">
+  <div class="container">
+    <p class="eyebrow reveal">Hound traces</p>
+    <h2 class="section-title reveal">A permanent record of what actually happened.</h2>
+    <p class="section-sub reveal">
+      Every execution session produces a trace — a plain-English record of what ran,
+      what it accessed, and whether it stayed within expected scope.
+      Clean sessions produce clean traces. Scope violations produce notable ones.
+    </p>
+
+    <div class="trace-cards">
+      <!-- Clean trace -->
+      <div class="trace-card reveal">
+        <div class="trace-card-header">
+          <div class="trace-dot clean"></div>
+          <span class="trace-card-title">npm install (project deps)</span>
+          <span class="trace-badge clean">Clean</span>
+        </div>
+        <div class="trace-card-body">
+          <div class="trace-field">
+            <p class="trace-field-label">What happened</p>
+            <p class="trace-field-value">
+              <strong>npm install</strong> fetched 847 packages from registry.npmjs.org
+              and wrote them to <code>node_modules/</code>.
+              No postinstall scripts left the project directory.
+            </p>
+          </div>
+          <div class="trace-field">
+            <p class="trace-field-label">What was accessed</p>
+            <p class="trace-field-value">Project directory only. No home directory. No credentials.</p>
+          </div>
+          <div class="trace-field">
+            <p class="trace-field-label">Network</p>
+            <p class="trace-field-value">registry.npmjs.org — expected for npm install.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Notable trace -->
+      <div class="trace-card reveal">
+        <div class="trace-card-header">
+          <div class="trace-dot notable"></div>
+          <span class="trace-card-title">postinstall script</span>
+          <span class="trace-badge notable">Notable</span>
+        </div>
+        <div class="trace-card-body">
+          <div class="trace-field">
+            <p class="trace-field-label">What happened</p>
+            <p class="trace-field-value">
+              A postinstall script executed by <strong>npm install</strong>
+              attempted to read <code>~/.aws/credentials</code>.
+              This is outside expected scope for a package install.
+            </p>
+          </div>
+          <div class="trace-field">
+            <p class="trace-field-label">What was targeted</p>
+            <p class="trace-field-value"><code>~/.aws/credentials</code> — cloud credential file</p>
+          </div>
+          <div class="trace-field">
+            <p class="trace-field-label">How it was caught</p>
+            <p class="trace-field-value">
+              npm install is expected to write packages, not read credential paths.
+              Hound flagged the scope mismatch.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
 <section>
   <div class="container">
-    <div class="two-col">
-      <div class="reveal">
-        <p class="eyebrow">Hound Trace</p>
-        <h2 class="section-title">When something happens, you'll understand exactly what it was.</h2>
-        <p style="font-size:17px;color:var(--muted);line-height:1.7;margin-bottom:20px;">Every scope violation generates a Hound Trace: what happened, what was targeted, how it was caught, and what was done about it. No logs to parse. No cryptic alert codes.</p>
-        <p style="font-size:17px;color:var(--muted);line-height:1.7;">Every trace maps to the MITRE ATT&amp;CK framework so you always know exactly which technique was used. All traces are stored permanently on your device &mdash; never sent to a server.</p>
-        <div style="margin-top:28px;">
-          <a href="./how-it-works.html" class="btn-ghost">See how it works</a>
-        </div>
+    <p class="eyebrow reveal">How it works</p>
+    <h2 class="section-title reveal">Behavioral, not signature-based.</h2>
+    <p class="section-sub reveal">
+      Hound doesn't rely on known-bad lists. It understands what each type of workflow
+      is supposed to do — and flags when behavior falls outside that scope.
+    </p>
+
+    <div class="how-grid">
+      <div class="how-step reveal">
+        <p class="how-number">01 — Observe</p>
+        <h3 class="how-title">Every execution is classified</h3>
+        <p class="how-body">
+          Hound identifies the source of each command: Claude Code, Cursor, an npm install,
+          a terminal session, or a shell script. Each source has an expected behavioral profile.
+        </p>
       </div>
-      <div class="hound-trace-card reveal">
-        <div class="hound-trace-header">
-          <span class="badge-amber">High Risk</span>
-          <span class="badge-red">Blocked</span>
-          <span class="badge-time">14:23:03</span>
-        </div>
-        <h4>Malicious downloader disguised as invoice PDF</h4>
-        <hr class="hound-trace-divider">
-        <div class="incident-timeline">
-          <div class="timeline-item">
-            <div class="timeline-dot"></div>
-            <div class="timeline-text"><span class="ts">14:23:01</span>File created in Downloads: invoice_march.pdf.exe</div>
-          </div>
-          <div class="timeline-item threat">
-            <div class="timeline-dot"></div>
-            <div class="timeline-text"><span class="ts">14:23:01</span>Magic bytes mismatch &mdash; executable disguised as PDF</div>
-          </div>
-          <div class="timeline-item threat">
-            <div class="timeline-dot"></div>
-            <div class="timeline-text"><span class="ts">14:23:02</span>File became executable (chmod +x applied)</div>
-          </div>
-          <div class="timeline-item threat">
-            <div class="timeline-dot"></div>
-            <div class="timeline-text"><span class="ts">14:23:02</span>Process spawned from Downloads directory</div>
-          </div>
-          <div class="timeline-item threat">
-            <div class="timeline-dot"></div>
-            <div class="timeline-text"><span class="ts">14:23:03</span>Outbound connection to 45.77.68.91 established</div>
-          </div>
-          <div class="timeline-item blocked">
-            <div class="timeline-dot"></div>
-            <div class="timeline-text"><span class="ts">14:23:03</span>INCIDENT: download_and_execute &mdash; Blocked. Process killed, file quarantined.</div>
-          </div>
-        </div>
+      <div class="how-step reveal">
+        <p class="how-number">02 — Evaluate</p>
+        <h3 class="how-title">Scope violations are detected</h3>
+        <p class="how-body">
+          When a process does something outside its expected scope — reads credentials,
+          installs persistence, makes unexpected network calls — Hound flags it.
+          Normal builds and installs produce zero output.
+        </p>
+      </div>
+      <div class="how-step reveal">
+        <p class="how-number">03 — Record</p>
+        <h3 class="how-title">A trace is written, permanently</h3>
+        <p class="how-body">
+          Every session gets a plain-English trace stored locally.
+          Clean sessions are logged as clean. Notable sessions explain what happened,
+          what was targeted, and how it was caught.
+        </p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- NOT YOUR TYPICAL AV -->
-<section class="bg2">
+<!-- COMPARISON -->
+<section class="comparison-section">
   <div class="container">
-    <p class="eyebrow reveal" style="text-align:center;">Why Hound</p>
-    <h2 class="section-title reveal" style="text-align:center;">Not your typical antivirus.</h2>
-    <p class="section-sub reveal" style="text-align:center;margin-left:auto;margin-right:auto;">Traditional AV fails because it compares files against known-bad lists. Hound fails attackers by watching what programs actually do.</p>
+    <p class="eyebrow reveal">Why not just use an antivirus?</p>
+    <h2 class="section-title reveal">Different tools. Different questions.</h2>
+    <p class="section-sub reveal">
+      Traditional security tools ask "is this known malware?"
+      Hound asks "is this consistent with what this workflow should be doing?"
+      Those are different questions with different answers.
+    </p>
+
     <div class="comparison-grid">
-      <div class="comparison-card reveal">
-        <div class="label">Traditional AV</div>
-        <h3>Signature-based detection misses everything novel</h3>
-        <p>Known signatures can only catch threats that have already been seen. Zero-days, fileless attacks, and obfuscated payloads pass right through. By the time the database is updated, the damage is done.</p>
+      <div class="comparison-card theirs reveal">
+        <p class="comparison-label">Traditional AV / Endpoint</p>
+        <h3>Made for IT security teams</h3>
+        <ul class="comparison-list">
+          <li>Signature databases for known malware</li>
+          <li>Alert on what's been seen before</li>
+          <li>Doesn't understand developer workflows</li>
+          <li>High noise from normal dev activity</li>
+          <li>No context about what a tool should do</li>
+          <li>Built for managed enterprise fleets</li>
+        </ul>
       </div>
-      <div class="comparison-card reveal">
-        <div class="label">Enterprise EDR</div>
-        <h3>Enterprise tools cost thousands per seat</h3>
-        <p>CrowdStrike and SentinelOne are genuinely excellent. They're also priced for organizations with dedicated security teams. A freelancer or a 10-person company can't access this category.</p>
-      </div>
-      <div class="comparison-card reveal">
-        <div class="label">Hound</div>
-        <h3>Behavioral detection. Free. On your machine.</h3>
-        <p>Hound catches attack patterns regardless of what the malware looks like. curl piped into bash is suspicious. A PDF that becomes an executable is suspicious. Hound understands this. No subscription required.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- HOW TO GET IT -->
-<section>
-  <div class="container" style="text-align:center;">
-    <p class="eyebrow reveal">Getting started</p>
-    <h2 class="section-title reveal">Running in under 5 minutes.</h2>
-    <p class="section-sub reveal" style="margin-left:auto;margin-right:auto;">No account required. No cloud signup. No subscription. Download, install, and it's watching.</p>
-    <div class="steps-list">
-      <div class="step reveal">
-        <div class="step-num">1</div>
-        <div class="step-content">
-          <h3>Download the installer</h3>
-          <p>Download the .dmg, drag Hound to Applications. Double-click to launch.</p>
-        </div>
-      </div>
-      <div class="step reveal">
-        <div class="step-num">2</div>
-        <div class="step-content">
-          <h3>Grant Full Disk Access</h3>
-          <p>Hound needs Full Disk Access to monitor the directories where threats appear. Grant it in System Settings &rarr; Privacy &amp; Security. No other special permissions required.</p>
-        </div>
-      </div>
-      <div class="step reveal">
-        <div class="step-num">3</div>
-        <div class="step-content">
-          <h3>Let it run</h3>
-          <p>Hound starts in Simulation Mode &mdash; it detects and alerts but does not take action. Review the incident feed. When you're confident, flip to Live Mode in Settings.</p>
-          <div class="step-meta">Simulation Mode is the default. You control when it acts.</div>
-        </div>
-      </div>
-    </div>
-    <div class="cta-row">
-      <a href="./download.html" class="btn-primary">Download Hound</a>
-      <a href="./detection.html" class="btn-ghost">See detection coverage</a>
-    </div>
-  </div>
-</section>
-
-<!-- TRUST -->
-<section class="bg-deep">
-  <div class="container">
-    <p class="eyebrow reveal">Privacy &amp; trust</p>
-    <h2 class="section-title reveal">Everything stays on your Mac.</h2>
-    <p class="section-sub reveal">Hound is designed for people who take their privacy seriously. No telemetry. No account. No cloud.</p>
-    <div class="trust-grid">
-      <div class="trust-card reveal">
-        <h3>No data leaves your machine</h3>
-        <p>All detection, correlation, and response happens locally. Your file paths, process names, and incident history never touch a server. The AI explanation feature is optional and only activates when you explicitly ask with an API key you provide.</p>
-      </div>
-      <div class="trust-card reveal">
-        <h3>No account required</h3>
-        <p>Download and run. There is no sign-in, no email capture, no license key. Hound will never lock you out or require renewal.</p>
-      </div>
-      <div class="trust-card reveal">
-        <h3>Simulation Mode by default</h3>
-        <p>Hound defaults to Simulation Mode on install. It detects and alerts but never kills a process or quarantines a file without your explicit opt-in. You review before it acts.</p>
-      </div>
-      <div class="trust-card reveal">
-        <h3>Hard guardrails, always on</h3>
-        <p>Even in Live Mode, Hound will never kill a system process, a browser, or anything in /System. Never quarantine a PDF, image, or document. The guardrail system is load-bearing and cannot be disabled.</p>
+      <div class="comparison-card ours reveal">
+        <p class="comparison-label">Hound</p>
+        <h3>Made for developers</h3>
+        <ul class="comparison-list">
+          <li>Behavioral scope detection — novel threats included</li>
+          <li>Understands Claude Code, Cursor, npm, pip</li>
+          <li>Zero noise from clean builds and installs</li>
+          <li>Alerts on credential access, persistence, exfil</li>
+          <li>Plain-English traces — not security jargon</li>
+          <li>Local-first, free, no account required</li>
+        </ul>
       </div>
     </div>
   </div>
 </section>
 
 <!-- FAQ -->
-<section class="bg2">
+<section id="faq">
   <div class="container">
-    <p class="eyebrow reveal" style="text-align:center;">Questions</p>
-    <h2 class="section-title reveal" style="text-align:center;">Frequently asked.</h2>
-    <div class="faq-list">
-      <div class="faq-item reveal">
-        <button class="faq-q" aria-expanded="false">
-          Does Hound slow down my Mac?
-          <span class="faq-indicator" aria-hidden="true">+</span>
-        </button>
-        <div class="faq-a">
-          <p>No. Hound uses ~16 MB of memory and less than 1% CPU during normal operation. Every subsystem runs within a 50ms budget per tick. For comparison, a single browser tab uses more memory than the entire Hound agent.</p>
-        </div>
-      </div>
-      <div class="faq-item reveal">
-        <button class="faq-q" aria-expanded="false">
-          Does it work without an internet connection?
-          <span class="faq-indicator" aria-hidden="true">+</span>
-        </button>
-        <div class="faq-a">
-          <p>Yes, completely. Detection, correlation, alerting, and response all run locally. There is no cloud backend. The optional AI explanation feature requires an Anthropic API key and an active internet connection, but the core agent works entirely offline.</p>
-        </div>
-      </div>
-      <div class="faq-item reveal">
-        <button class="faq-q" aria-expanded="false">
-          Will Hound generate a lot of false positives?
-          <span class="faq-indicator" aria-hidden="true">+</span>
-        </button>
-        <div class="faq-a">
-          <p>Hound requires multiple related suspicious behaviors to fire an incident alert &mdash; a single unusual action is never enough on its own. It comes pre-configured to recognize common developer tools (cargo, node, python, git) and popular apps (Chrome, Xcode, VS Code). You can add your own trusted processes in Settings.</p>
-        </div>
-      </div>
-      <div class="faq-item reveal">
-        <button class="faq-q" aria-expanded="false">
-          What does Hound actually do when it detects something?
-          <span class="faq-indicator" aria-hidden="true">+</span>
-        </button>
-        <div class="faq-a">
-          <p>By default, Hound runs in Simulation Mode: it detects, alerts, and explains, but takes no action. When you're ready, switch to Live Mode in Settings. In Live Mode, Hound kills the malicious process and moves the file to an on-device quarantine. It will never act on system processes, browsers, or files outside its defined risk categories. Every action is logged in a response audit trail you can review at any time.</p>
-        </div>
-      </div>
-      <div class="faq-item reveal">
-        <button class="faq-q" aria-expanded="false">
-          How is this free?
-          <span class="faq-indicator" aria-hidden="true">+</span>
-        </button>
-        <div class="faq-a">
-          <p>Hound is free because its goal is adoption, not revenue. Every Mac running Hound is a Mac that is more protected. Distribution and trust are the objectives. There are no paid tiers, no feature gates, and no plan to add them.</p>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
+    <p class="eyebrow reveal">FAQ</p>
+    <h2 class="section-title reveal">Common questions</h2>
 
-<!-- CTA -->
-<section style="text-align:center; border-top: 1px solid var(--border);">
-  <div class="container">
-    <p class="eyebrow reveal">Get protected</p>
-    <h2 class="section-title reveal">Know exactly what your tools do.</h2>
-    <p class="reveal" style="font-size:18px;color:var(--muted);max-width:520px;margin:0 auto 40px;line-height:1.65;">Free, local-first execution visibility for developers. No account. No subscription. No noise.</p>
-    <div class="cta-row reveal">
-      <a href="./download.html" class="btn-primary">Download for macOS &mdash; Free</a>
-      <a href="./detection.html" class="btn-ghost">Full detection coverage</a>
+    <div class="faq-list reveal">
+      <div class="faq-item">
+        <button class="faq-q" onclick="toggleFaq(this)">
+          Does Hound work with Claude Code and Cursor?
+          <svg class="faq-chevron" width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <div class="faq-a">
+          Yes. Hound classifies commands by execution source, so it understands when Claude Code,
+          Cursor, or Codex is the origin of a command. It applies the expected behavioral profile
+          for that tool — what it's allowed to write, what network it should use, whether it
+          should ever touch credential files — and flags when behavior falls outside that scope.
+        </div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" onclick="toggleFaq(this)">
+          Will it generate a lot of noise during normal builds?
+          <svg class="faq-chevron" width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <div class="faq-a">
+          No. This is the core design constraint. <code>npm install</code>, <code>cargo build</code>,
+          <code>git pull</code> produce zero output. Hound's philosophy is silence unless something
+          actually matters. Clean executions are logged as clean traces but never surfaced as alerts.
+        </div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" onclick="toggleFaq(this)">
+          What does Hound actually flag?
+          <svg class="faq-chevron" width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <div class="faq-a">
+          Scope violations: accessing credential files (<code>~/.ssh</code>, <code>~/.aws</code>,
+          macOS Keychain), installing persistence artifacts (LaunchAgents, LaunchDaemons, crontab),
+          unexpected outbound network connections, privilege escalation patterns, and
+          download-and-execute chains like <code>curl | bash</code>. These are behaviors that
+          fall outside what any normal build or install workflow should need to do.
+        </div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" onclick="toggleFaq(this)">
+          Does my data leave my machine?
+          <svg class="faq-chevron" width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <div class="faq-a">
+          No. All detection runs locally on your Mac. Hound traces are written to your local filesystem.
+          The optional AI narrative enhancement uses the Anthropic API, but only if you configure an API key
+          and explicitly request it for a specific trace. Nothing is sent automatically.
+        </div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" onclick="toggleFaq(this)">
+          Can Hound block things, or just observe?
+          <svg class="faq-chevron" width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <div class="faq-a">
+          Both. In simulation mode (the default), Hound observes and records everything but takes no
+          action. With simulation mode off, it can terminate processes and quarantine files. We recommend
+          starting in simulation mode and reviewing a few days of traces before enabling real response,
+          so you can confirm the behavior on your specific setup.
+        </div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" onclick="toggleFaq(this)">
+          What are the system requirements?
+          <svg class="faq-chevron" width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <div class="faq-a">
+          macOS 13 (Ventura) or later. Apple Silicon and Intel both supported. The agent is written in Rust
+          and is designed to be lightweight — minimal CPU overhead during normal operation.
+        </div>
+      </div>
     </div>
   </div>
 </section>
 
 <!-- FOOTER -->
 <footer>
-  <div class="footer-grid">
-    <div class="footer-brand">
-      <div class="footer-brand-row">
-        <svg width="16" height="16" viewBox="0 0 52 52" fill="none" aria-hidden="true">
-          <path d="M26 4L7 14v11c0 11.4 8.15 22.07 19.56 24.67C37.85 47.07 45 36.4 45 25V14L26 4z" fill="rgba(255,255,255,0.10)" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"/>
-          <path d="M19 26l5 5 9-9" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        Hound
-      </div>
-      <p class="footer-brand-tag">Execution visibility for developers</p>
+  <div class="container">
+    <p class="footer-brand">Hound</p>
+    <div class="footer-links">
+      <a href="how-it-works.html">How it works</a>
+      <a href="detection.html">Detection</a>
+      <a href="download.html">Download</a>
+      <a href="#faq">FAQ</a>
     </div>
-    <nav class="footer-nav" aria-label="Footer navigation">
-      <a href="./how-it-works.html">How it works</a>
-      <a href="./detection.html">Detection coverage</a>
-      <a href="./download.html">Download</a>
-      <a href="#">Privacy</a>
-    </nav>
-    <div class="footer-tech">Built with Rust, Tauri, and React<br>Free &middot; Local-first &middot; Privacy-first</div>
-  </div>
-  <div class="footer-bottom">
-    <span>&copy; 2026 Hound Security</span>
-    <span>Hound is not affiliated with or endorsed by Apple Inc.</span>
+    <p class="footer-copy">Free and local-first. No account required.</p>
   </div>
 </footer>
 
 <script>
-// Scroll progress bar
-const progress = document.getElementById('progress');
-window.addEventListener('scroll', () => {
-  const h = document.documentElement;
-  const pct = (window.scrollY / (h.scrollHeight - h.clientHeight)) * 100;
-  progress.style.width = pct + '%';
-}, { passive: true });
-
-// Nav darkens on scroll
-const nav = document.getElementById('main-nav');
-window.addEventListener('scroll', () => {
-  nav.classList.toggle('scrolled', window.scrollY > 20);
-}, { passive: true });
-
-// Scroll reveal
-const obs = new IntersectionObserver(entries => {
-  entries.forEach(e => {
-    if (e.isIntersecting) { e.target.classList.add('visible'); obs.unobserve(e.target); }
+  // Progress bar
+  window.addEventListener('scroll', () => {
+    const doc = document.documentElement;
+    const pct = (doc.scrollTop / (doc.scrollHeight - doc.clientHeight)) * 100;
+    document.getElementById('progress').style.width = pct + '%';
   });
-});
-document.querySelectorAll('.reveal').forEach(el => obs.observe(el));
 
-// Mobile nav
-const toggle = document.getElementById('nav-toggle');
-const menu = document.getElementById('nav-menu');
-if (toggle && menu) {
-  toggle.addEventListener('click', () => {
-    const open = menu.classList.toggle('open');
-    toggle.setAttribute('aria-expanded', open);
-  });
-}
+  // Nav scroll state
+  window.addEventListener('scroll', () => {
+    document.getElementById('nav').classList.toggle('scrolled', window.scrollY > 20);
+  }, { passive: true });
 
-// FAQ accordion
-document.querySelectorAll('.faq-q').forEach(btn => {
-  btn.addEventListener('click', () => {
+  // Reveal on scroll
+  const observer = new IntersectionObserver(
+    (entries) => entries.forEach((e) => { if (e.isIntersecting) e.target.classList.add('visible'); }),
+    { threshold: 0.1 }
+  );
+  document.querySelectorAll('.reveal').forEach((el) => observer.observe(el));
+
+  // FAQ
+  function toggleFaq(btn) {
     const item = btn.closest('.faq-item');
     const wasOpen = item.classList.contains('open');
-    document.querySelectorAll('.faq-item').forEach(i => {
-      i.classList.remove('open');
-      i.querySelector('.faq-q').setAttribute('aria-expanded', 'false');
-    });
-    if (!wasOpen) {
-      item.classList.add('open');
-      btn.setAttribute('aria-expanded', 'true');
-    }
-  });
-});
-
-// Terminal demo animation
-const termBody = document.getElementById('terminal-body');
-const termCursor = document.getElementById('term-cursor');
-const lines = [
-  { cls: '', ts: '14:23:01', ev: 'file_created', detail: '~/Downloads/invoice_march.pdf.exe' },
-  { cls: 'alert-line', ts: '14:23:01', ev: 'magic_bytes_mismatch', detail: 'MZ header in .pdf file — executable disguised as document' },
-  { cls: 'alert-line', ts: '14:23:02', ev: 'file_became_executable', detail: 'chmod +x applied post-download' },
-  { cls: 'alert-line', ts: '14:23:02', ev: 'process_spawned', detail: 'invoice_march.pdf.exe (pid 38291, parent: zsh)' },
-  { cls: 'alert-line', ts: '14:23:03', ev: 'network_connection', detail: '192.168.1.5:49302 → 45.77.68.91:443' },
-  { cls: 'alert-line', ts: '14:23:03', ev: 'alert_c2_beaconing_pattern', detail: 'confidence=high, pid=38291' },
-  { cls: 'alert-line', ts: '14:23:03', ev: 'alert_downloaded_file_executed', detail: 'confidence=high, pid=38291' },
-  { cls: 'block-line', ts: '14:23:03', ev: 'INCIDENT: download_and_execute', detail: 'BLOCKED — process killed, file quarantined' },
-];
-
-let lineIdx = 0;
-let started = false;
-
-function appendLine() {
-  if (lineIdx >= lines.length) {
-    // pause then restart
-    setTimeout(() => {
-      termBody.innerHTML = '';
-      termBody.appendChild(termCursor);
-      lineIdx = 0;
-      setTimeout(tick, 1200);
-    }, 4000);
-    return;
+    document.querySelectorAll('.faq-item.open').forEach((i) => i.classList.remove('open'));
+    if (!wasOpen) item.classList.add('open');
   }
-  const l = lines[lineIdx++];
-  const span = document.createElement('span');
-  span.className = 'terminal-line' + (l.cls ? ' ' + l.cls : '');
-  span.innerHTML = `<span class="ts">[${l.ts}]</span> <span class="ev">${l.ev}</span><span class="path">: ${l.detail}</span>`;
-  termBody.insertBefore(span, termCursor);
-  const delay = lineIdx <= 5 ? 600 : 300;
-  setTimeout(tick, delay);
-}
-
-function tick() { appendLine(); }
-
-// Start when terminal scrolls into view
-const termObs = new IntersectionObserver(entries => {
-  if (entries[0].isIntersecting && !started) {
-    started = true;
-    setTimeout(tick, 800);
-    termObs.disconnect();
-  }
-});
-const termWrap = document.querySelector('.terminal-wrap');
-if (termWrap) termObs.observe(termWrap);
 </script>
+
 </body>
 </html>

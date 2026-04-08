@@ -218,7 +218,10 @@ pub fn detect_scope_violations(
     //    (e.g., a test runner doing curl to an external IP is unusual)
     //    Only flag when source is IDE or Terminal and the command is a known
     //    interpreter that shouldn't be making raw network calls.
-    if matches!(ctx.source, ExecutionSource::IDE | ExecutionSource::Terminal) {
+    if matches!(ctx.source,
+        ExecutionSource::Terminal | ExecutionSource::VscodeTerminal |
+        ExecutionSource::ClaudeCode | ExecutionSource::Cursor
+    ) {
         let network_interpreters = ["python", "python3", "ruby", "node", "deno", "perl"];
         if network_interpreters.iter().any(|&interp| cmd_basename.starts_with(interp)) {
             let network_flags = ["-c", "--eval", "-e"];
@@ -367,7 +370,7 @@ mod tests {
     #[test]
     fn test_no_violation_for_cargo_build() {
         let p = make_process("/Users/user/.cargo/bin/cargo", "build --release", Some("/usr/share/cursor/cursor"));
-        let ctx = make_ctx(ExecutionSource::IDE, &p);
+        let ctx = make_ctx(ExecutionSource::VscodeTerminal, &p);
         let events = detect_scope_violations(&p, &ctx, Utc::now());
         assert!(events.is_empty(), "cargo build should not trigger any scope violations");
     }
@@ -375,7 +378,7 @@ mod tests {
     #[test]
     fn test_no_violation_for_npm_install() {
         let p = make_process("/usr/local/bin/npm", "install", Some("/usr/share/code/code"));
-        let ctx = make_ctx(ExecutionSource::IDE, &p);
+        let ctx = make_ctx(ExecutionSource::VscodeTerminal, &p);
         let events = detect_scope_violations(&p, &ctx, Utc::now());
         assert!(events.is_empty(), "npm install should not trigger any scope violations");
     }

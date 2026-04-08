@@ -4,28 +4,58 @@
 
 ---
 
-## PRODUCT DIRECTION (April 2026 Pivot)
+# HOUND — PRODUCT DIRECTION
 
-**Primary audience: developers and builders.**
+## What Hound is
+Hound is a developer-focused execution safety layer for macOS.
 
-Hound has pivoted from consumer/SMB endpoint security to execution visibility for developers. The core use case is: you're a developer running builds, installing packages, executing scripts — and you want to know if any of your tools are doing something outside expected scope.
+It watches what happens when code runs — processes spawned, files touched,
+network connections opened, credentials accessed — and surfaces that
+information only when an execution steps outside its expected scope.
 
-**Core philosophy: silence unless something actually matters.**
-- Clean builds, `npm install`, `cargo build`, `git pull` — zero output, zero noise.
-- Scope violations only: credential access (`.ssh`, `.aws`, Keychain), unexpected outbound network, persistence installation, privilege escalation, download-and-execute patterns.
-- Every alert is a Hound Trace: a permanent, plain-English record of what happened, what was targeted, how it was caught, and what was done.
+## The core question Hound asks
+Not: "Is this malware?"
+But: "Is this consistent with what this workflow should be doing?"
 
-**Key new modules (April 2026):**
-- `execution_context.rs` — `ExecutionContext`, `ExecutionSource` (Terminal/IDE/CI/Script/Unknown), `ExecutionTracker`
-- `scope_violation.rs` — scope violation detection with clean negative cases (no false positives on `git pull`, `cargo build`, `npm install`)
-- `Dashboard.tsx` — rebuilt as Trace Feed: State A (all clear) and State B (recent scope violations)
-- Notification logic — `shouldNotify()` / `getNotificationText()`: suppress `behavioral_chain` noise below score 50, only notify on genuine scope violations
+## The target user
+Developers running code they didn't write or fully inspect:
+- AI coding tools (Claude Code, Cursor, Codex, Windsurf)
+- npm/pip/cargo install scripts
+- GitHub setup scripts and READMEs
+- Automation tools and dotfile installers
 
-**What did NOT change:**
-- All 225+ existing detection tests still pass (now 270+)
-- The full MITRE ATT&CK detection engine is still running
-- Incident correlation, response engine, quarantine, whitelist — all unchanged
-- The detection layer still catches everything it caught before; the UI and notification layer now filters for developer-relevant scope violations
+## The core philosophy
+Silence unless something matters.
+- Normal executions: no notification, no UI, no noise
+- Scope violations: one clear notification, full trace available
+- Critical violations: immediate alert, blocked when possible
+
+## The primary product surface
+The Hound Trace — a plain-English record of what an execution did.
+Not just threats. Every significant execution gets a trace.
+Most traces say: clean. That is the point.
+
+## What Hound is NOT
+- Not a general-purpose antivirus
+- Not an enterprise SIEM
+- Not a threat hunting platform
+- Not a consumer security product
+
+## The detection engine
+The behavioral detection engine (270+ tests, 84 alert types, 3 tranches)
+remains intact and unchanged. Its purpose shifts:
+instead of generating incidents for everything suspicious,
+it evaluates whether an execution exceeded its expected scope.
+
+High-confidence scope violations surface immediately.
+Low-confidence signals accumulate silently in traces.
+The user sees the output, not the machinery.
+
+## ESF roadmap
+Apple ESF entitlement requested — pending approval (2-6 weeks).
+When approved: pre-execution blocking via System Extension.
+Until then: post-execution detection and alerting.
+Do not build ESF infrastructure until entitlement is confirmed.
 
 ---
 

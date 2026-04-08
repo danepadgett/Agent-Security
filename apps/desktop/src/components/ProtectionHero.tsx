@@ -25,8 +25,8 @@ export function ProtectionHero({
   const statusLabel = isOffline
     ? "Agent Offline"
     : activeIncidents > 0
-    ? `${activeIncidents} Active Threat${activeIncidents !== 1 ? "s" : ""}`
-    : "Monitoring Active";
+    ? `${activeIncidents} Scope Violation${activeIncidents !== 1 ? "s" : ""}`
+    : "Watching quietly";
 
   const sevAttr = isOffline ? "info" : threatLevel;
 

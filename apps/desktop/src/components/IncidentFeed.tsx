@@ -104,7 +104,7 @@ export function IncidentFeed({
           )}
         </div>
         <span className="feed-count">
-          {displayedIncidents.length} incident{displayedIncidents.length !== 1 ? "s" : ""}
+          {displayedIncidents.length} trace{displayedIncidents.length !== 1 ? "s" : ""}
         </span>
       </div>
 
@@ -122,12 +122,12 @@ export function IncidentFeed({
                       stroke="var(--border-strong)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 </div>
-                All clear — {totalEvents.toLocaleString()} events analyzed, no threats.
+                All clear — {totalEvents.toLocaleString()} events analyzed, nothing outside scope.
               </>
             ) : tab === "resolved" ? (
-              "No resolved incidents yet."
+              "No resolved traces yet."
             ) : (
-              "No incidents recorded yet."
+              "No traces recorded yet."
             )}
           </div>
         ) : (

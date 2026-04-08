@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Detection coverage — Hound EDR for macOS</title>
-<meta name="description" content="Hound covers ~95% of the MITRE ATT&CK framework from user space. 45 detection functions across 11 tactics. 165 passing tests.">
+<title>Detection coverage — Hound execution visibility for developers</title>
+<meta name="description" content="Hound's behavioral detection engine runs 274+ tests across 11 MITRE ATT&CK tactics. Credential access, persistence, privilege escalation, unexpected network — everything a developer needs to know about what their tools actually did.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 52 52'><path d='M26 4L7 14v11c0 11.4 8.15 22.07 19.56 24.67C37.85 47.07 45 36.4 45 25V14L26 4z' fill='rgba(255,255,255,0.10)' stroke='%23ffffff' stroke-width='2.5' stroke-linejoin='round'/><path d='M19 26l5 5 9-9' stroke='%23ffffff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/></svg>">
 <style>
   :root {
@@ -620,6 +620,7 @@
       <p class="section-eyebrow">Detection index</p>
       <h2 class="section-headline">Every detection function.</h2>
       <div class="section-body">
+        <p>The detection engine runs a full MITRE ATT&amp;CK behavioral analysis on every process, file, and network event. For developers, the relevant surface is scope violations: <strong>credential access</strong>, <strong>persistence installation</strong>, <strong>unexpected network</strong>, and <strong>privilege escalation</strong>. Those are the detections Hound surfaces as traces. The full engine runs regardless — it catches attack chains that would otherwise be invisible.</p>
         <p>Click any column header to sort. Use the search box to filter by name, tactic, or technique ID.</p>
       </div>
       <div class="table-controls">

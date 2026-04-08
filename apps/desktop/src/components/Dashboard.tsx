@@ -1,5 +1,4 @@
 import type { AgentStatus, BehavioralIncident, HoundTrace } from "../types";
-import { ShieldIcon } from "./icons";
 import { formatRelativeTime, formatUptime } from "../utils";
 
 type Props = {
@@ -14,11 +13,30 @@ type Props = {
   onViewHistory: () => void;
 };
 
-const VERDICT_COLOR: Record<string, string> = {
-  Blocked: "#ef4444",
-  "Simulated block": "#f97316",
-  Monitoring: "#3b82f6",
-};
+
+function verdictClass(verdict: string): string {
+  const v = verdict.toLowerCase();
+  if (v === "blocked" || v === "critical") return "verdict-badge critical";
+  if (v === "simulated block" || v === "notable") return "verdict-badge notable";
+  return "verdict-badge clean";
+}
+
+function verdictLabel(verdict: string): string {
+  const v = verdict.toLowerCase();
+  if (v === "blocked") return "Blocked";
+  if (v === "simulated block") return "Simulated";
+  if (v === "monitoring") return "Monitoring";
+  return verdict;
+}
+
+function sevColor(sev: string): string {
+  switch (sev) {
+    case "critical": return "#ef4444";
+    case "high":     return "#f97316";
+    case "medium":   return "#eab308";
+    default:         return "#606060";
+  }
+}
 
 export function Dashboard({
   agentStatus,
@@ -34,118 +52,101 @@ export function Dashboard({
   const isOffline = agentStatus !== null && !agentStatus.running;
   const isSimMode = agentStatus?.simulation_mode ?? true;
   const hasViolations = activeIncidents > 0;
+  const hasTraces = recentHoundTraces.length > 0;
 
-  // State A: all clear. State B: violations present.
-  const allClear = !isOffline && !hasViolations;
+  // State A: all clear — calm, no drama
+  if (!isOffline && !hasViolations && !hasTraces) {
+    return (
+      <div className="dashboard-clean">
+        <div className="protection-status">
+          <div className="status-dot active" />
+          <span className="status-text">Watching quietly</span>
+          {isSimMode && <span className="sim-badge-inline">Simulation</span>}
+          <span className="status-uptime">{formatUptime(uptimeSeconds)}</span>
+        </div>
 
-  const recentTraces = recentHoundTraces.slice(0, 5);
+        <div className="clean-message">
+          <h2>Everything looks normal.</h2>
+          <p>
+            Hound has analyzed {totalEvents.toLocaleString()} events.
+            Nothing has stepped outside its expected scope.
+          </p>
+        </div>
 
+        <div className="stat-row">
+          <div className="stat">
+            <span className="stat-value">0</span>
+            <span className="stat-label">Scope violations</span>
+          </div>
+          <div className="stat">
+            <span className="stat-value">{totalEvents.toLocaleString()}</span>
+            <span className="stat-label">Events analyzed</span>
+          </div>
+          <div className="stat">
+            <span className="stat-value">{formatUptime(uptimeSeconds)}</span>
+            <span className="stat-label">Uptime</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // State B: recent traces or active violations
   return (
     <div className="dashboard">
-      {/* Status hero */}
+      {/* Status bar */}
       <div className={`dashboard-status-bar ${hasViolations ? "dashboard-status-bar--alert" : ""}`}>
-        <div
-          className={`dashboard-shield ${
-            isOffline
-              ? "dashboard-shield--offline"
+        <div className="protection-status">
+          <div className={`status-dot ${isOffline ? "offline" : hasViolations ? "alert" : "active"}`} />
+          <span className="status-text">
+            {isOffline
+              ? "Agent offline"
               : hasViolations
-              ? "dashboard-shield--threat"
-              : "dashboard-shield--protected"
-          }`}
-        >
-          <ShieldIcon size={20} />
+              ? `${activeIncidents} scope violation${activeIncidents !== 1 ? "s" : ""}`
+              : "Watching quietly"}
+          </span>
+          {!isOffline && isSimMode && <span className="sim-badge-inline">Simulation</span>}
         </div>
 
-        <div className="dashboard-status-text">
-          {isOffline ? (
-            <>
-              <div className="dashboard-status-label">Agent offline</div>
-              <div className="dashboard-status-sub">The monitoring agent is not running.</div>
-            </>
-          ) : allClear ? (
-            <>
-              <div className="dashboard-status-label">All clear</div>
-              <div className="dashboard-status-sub">
-                {totalEvents.toLocaleString()} events analyzed — no scope violations.
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="dashboard-status-label">
-                {activeIncidents} scope violation{activeIncidents !== 1 ? "s" : ""}
-              </div>
-              <div className="dashboard-status-sub">Review the Incidents tab for details.</div>
-            </>
-          )}
-        </div>
-
-        {!isOffline && isSimMode && (
-          <span className="sim-badge">Simulation</span>
-        )}
-        {isOffline && (
-          <span className="offline-badge">Offline</span>
-        )}
-      </div>
-
-      {/* Stat row */}
-      <div className="dashboard-stats">
-        <div className="dashboard-stat">
-          <div className="dashboard-stat-value">{totalEvents.toLocaleString()}</div>
-          <div className="dashboard-stat-label">Events analyzed</div>
-        </div>
-        <div className="dashboard-stat">
-          <div className="dashboard-stat-value">{totalIncidents}</div>
-          <div className="dashboard-stat-label">Total incidents</div>
-        </div>
-        <div className="dashboard-stat">
-          <div className="dashboard-stat-value">{formatUptime(uptimeSeconds)}</div>
-          <div className="dashboard-stat-label">Uptime</div>
+        <div className="dashboard-stat-row">
+          <div className="dashboard-stat-sm">
+            <span className="stat-value-sm">{totalEvents.toLocaleString()}</span>
+            <span className="stat-label-sm">events</span>
+          </div>
+          <div className="dashboard-stat-sm">
+            <span className="stat-value-sm">{totalIncidents}</span>
+            <span className="stat-label-sm">traces</span>
+          </div>
+          <div className="dashboard-stat-sm">
+            <span className="stat-value-sm">{formatUptime(uptimeSeconds)}</span>
+            <span className="stat-label-sm">uptime</span>
+          </div>
         </div>
       </div>
 
       {/* Trace feed */}
-      <div className="dashboard-activity">
-        <div className="dashboard-activity-header">
-          <span className="dashboard-activity-title">Recent traces</span>
-          <div className="dashboard-activity-actions">
+      <div className="trace-feed-section">
+        <div className="trace-feed-header">
+          <span className="trace-feed-title">
+            {hasTraces ? "Recent traces" : "Scope violations"}
+          </span>
+          <div className="trace-feed-actions">
             {activeIncidents > 0 && (
-              <button className="dashboard-view-all" onClick={onViewIncidents}>
-                Incidents
+              <button className="trace-link-btn" onClick={onViewIncidents}>
+                Traces →
               </button>
             )}
             {totalIncidents > 0 && (
-              <button className="dashboard-view-all" onClick={onViewHistory}>
-                History
+              <button className="trace-link-btn" onClick={onViewHistory}>
+                History →
               </button>
             )}
           </div>
         </div>
 
-        {recentTraces.length === 0 && recentIncidents.length === 0 ? (
-          <div className="dashboard-empty">
-            <div className="dashboard-empty-icon">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M12 2L3.5 6v5.5C3.5 16.9 7.2 21.4 12 23c4.8-1.6 8.5-6.1 8.5-11.5V6L12 2z"
-                  stroke="var(--border-strong)"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-                <polyline
-                  points="9 12 11 14 15 10"
-                  stroke="var(--border-strong)"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </div>
-            No traces yet. Hound Traces are generated when incidents are resolved.
-          </div>
-        ) : recentTraces.length > 0 ? (
-          <div className="trace-feed">
-            {recentTraces.map((trace) => (
+        <div className="trace-feed">
+          {hasTraces ? (
+            recentHoundTraces.map((trace) => (
               <div
                 key={trace.incident_id}
                 className="trace-row"
@@ -154,75 +155,53 @@ export function Dashboard({
                 tabIndex={0}
                 onKeyDown={(e) => e.key === "Enter" && onViewHistory()}
               >
-                <div
-                  className="trace-row-bar"
-                  style={{ background: riskColor(trace.risk_level) }}
-                />
-                <div className="trace-row-body">
-                  <div className="trace-row-headline">{trace.headline}</div>
-                  <div className="trace-row-sub">
-                    {trace.what_happened.slice(0, 80)}
-                    {trace.what_happened.length > 80 ? "…" : ""}
-                  </div>
-                </div>
-                <div className="trace-row-meta">
-                  <span
-                    className="trace-verdict"
-                    style={{ color: VERDICT_COLOR[trace.verdict] ?? "var(--text-tertiary)" }}
-                  >
-                    {trace.verdict}
+                <div className="trace-source">
+                  <span className="source-name">
+                    {/* source isn't on legacy HoundTrace — use risk_level color as fallback indicator */}
+                    Hound Trace
                   </span>
-                  <span className="trace-row-time">{formatRelativeTime(trace.timestamp)}</span>
+                </div>
+                <div className="trace-summary">
+                  {trace.what_happened.slice(0, 80)}
+                  {trace.what_happened.length > 80 ? "…" : ""}
+                </div>
+                <div className="trace-meta">
+                  <span className="trace-time">{formatRelativeTime(trace.timestamp)}</span>
+                  <span className={verdictClass(trace.verdict)}>
+                    {verdictLabel(trace.verdict)}
+                  </span>
                 </div>
               </div>
-            ))}
-          </div>
-        ) : (
-          // Fallback: show raw incidents when no traces exist yet
-          <div className="incident-list">
-            {recentIncidents.slice(0, 5).map((inc) => (
+            ))
+          ) : (
+            // Fallback: raw incidents when no traces exist
+            recentIncidents.slice(0, 5).map((inc) => (
               <div
                 key={inc.id}
-                className="incident-row"
+                className="trace-row"
                 onClick={onViewIncidents}
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => e.key === "Enter" && onViewIncidents()}
               >
-                <div
-                  className="incident-row-sev"
-                  style={{ background: sevColor(inc.severity) }}
-                />
-                <div className="incident-row-body">
-                  <div className="incident-row-label">{inc.attack_chain_label}</div>
-                  <div className="incident-row-meta">
-                    {inc.process_name ?? inc.primary_path ?? inc.reason}
-                  </div>
+                <div className="trace-source">
+                  <span className="source-name">{inc.process_name ?? "Unknown"}</span>
                 </div>
-                <div className="incident-row-time">{formatRelativeTime(inc.timestamp)}</div>
+                <div className="trace-summary">{inc.attack_chain_label.replace(/_/g, " ")}</div>
+                <div className="trace-meta">
+                  <span className="trace-time">{formatRelativeTime(inc.timestamp)}</span>
+                  <span
+                    className="verdict-badge notable"
+                    style={{ background: sevColor(inc.severity) + "1a", color: sevColor(inc.severity) }}
+                  >
+                    {inc.severity}
+                  </span>
+                </div>
               </div>
-            ))}
-          </div>
-        )}
+            ))
+          )}
+        </div>
       </div>
     </div>
   );
-}
-
-function riskColor(risk: string): string {
-  switch (risk.toLowerCase()) {
-    case "critical": return "#ef4444";
-    case "high":     return "#f97316";
-    case "medium":   return "#eab308";
-    default:         return "#606060";
-  }
-}
-
-function sevColor(sev: string): string {
-  switch (sev) {
-    case "critical": return "#ef4444";
-    case "high":     return "#f97316";
-    case "medium":   return "#eab308";
-    default:         return "#606060";
-  }
 }
