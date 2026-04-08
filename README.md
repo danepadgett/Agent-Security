@@ -1,22 +1,82 @@
 # Hound
 
-Execution visibility for developers on macOS. Free, forever.
+**Security for Builders on macOS.**
 
-Hound gives developers complete transparency into what their tools actually do. Running a build, installing a package, executing a script? Hound is silent — unless something steps outside expected scope. Credential access, unexpected outbound network, persistence installation, or privilege escalation generate a Hound Trace: a permanent, plain-English record of what happened and what was done.
+Hound shows you what the code you run is actually doing.
+
+Scripts from GitHub. AI-generated code. Install commands you don’t fully read. Local tools. MCP servers. Homegrown apps.
+
+Hound runs quietly in the background and tells you when something steps outside expected scope.
+
+If a build is clean, Hound stays silent.
+
+If something touches credentials, installs persistence, opens unexpected network connections, or escalates privileges, Hound generates a **Hound Trace** — a clear, local record of what happened and what was done.
 
 No noise. No cloud dependency. No subscription.
+
+---
+## Why Hound exists
+
+Modern builders run more untrusted code than ever before.
+
+That code comes from:
+- AI coding tools  
+- GitHub repos  
+- install scripts  
+- package postinstall hooks  
+- local automation  
+- internal tools  
+- MCP servers and agent tooling  
+
+Most of the time, nothing is wrong.
+
+The problem is when something *is* wrong, you usually can’t see it.
+
+You run a script. It finishes. That’s it.
+
+Hound changes that.
+
+It gives builders visibility into what their tools actually do when they execute.
 
 ---
 
 ## What it does
 
-- **Scope violation detection** — Silence for clean builds (`npm install`, `cargo build`, `git pull`). Alerts only when tools do something outside expected scope: credential access, unexpected network, persistence install, privilege escalation.
-- **Hound Traces** — Every scope violation generates a permanent plain-English record: what happened, what was targeted, how it was caught, what was done. Stored locally, never sent anywhere.
-- **270+ detection tests** — ~95% MITRE ATT&CK user-space coverage. Catches supply chain attacks, fileless malware, and novel threats that signature scanners miss.
-- **Execution context** — Knows whether a process came from your terminal, IDE, CI pipeline, or a script. Uses context to sharpen detection accuracy.
-- **Automated response** — Kills malicious processes and quarantines files (simulation mode by default).
-- **Desktop UI** — Tauri + React app with incident inbox, Hound Trace history, and settings.
-- **Local-first** — Everything runs on your Mac. No cloud required for detection or response.
+- **Stays quiet for normal work** — `npm install`, `cargo build`, `git pull`, local scripts, and standard workflows produce no noise  
+- **Scope violation detection** — Alerts only when code does something outside expected scope: credential access, unexpected network, persistence install, privilege escalation  
+- **Hound Traces** — Every violation generates a clear, local record: what happened, what was targeted, how it was caught, and what was done  
+- **Execution context awareness** — Knows whether a process came from your terminal, IDE, CI pipeline, or script chain  
+- **Automated response** — Can kill malicious processes and quarantine files (simulation mode by default)  
+- **Desktop UI** — Tauri + React app with Trace Feed, history, onboarding, and settings  
+- **Local-first** — Everything runs on your machine  
+
+---
+
+## The user experience
+
+Hound is designed to disappear when nothing is wrong.
+
+### Clean execution
+
+| What you run | Output |
+|---|---|
+| `npm install` | Nothing |
+| `cargo build --release` | Nothing |
+| `git pull origin main` | Nothing |
+| normal scripts | Nothing |
+
+### Out-of-scope execution
+
+| What happens | Output |
+|---|---|
+| postinstall script accessing `~/.aws/credentials` | **Alert** |
+| build tool installing a LaunchAgent | **Alert** |
+| `curl \| bash` from a CI runner | **Alert** |
+| dependency connecting to an unknown IP | **Alert** |
+| process attempting privilege escalation | **Alert** |
+
+**Silence unless something actually matters.**
+
 
 ---
 

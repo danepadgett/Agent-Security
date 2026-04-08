@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hound — Threat Blocked</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --bg-card: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent-red: #ef4444;
+      --accent-green: #10b981;
+      --accent-orange: #f97316;
+    }
+
+    html, body {
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      max-width: 520px;
+      width: 100%;
+      padding: 40px 36px;
+      box-shadow: 0 8px 48px rgba(0,0,0,0.6);
+      animation: card-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    @keyframes card-in {
+      from { opacity: 0; transform: translateY(16px) scale(0.97); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 28px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand-icon {
+      width: 24px;
+      height: 24px;
+      color: var(--accent-green);
+    }
+
+    .brand-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--muted);
+      letter-spacing: 0.02em;
+    }
+
+    /* ── Threat section ── */
+    .threat-hero {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+
+    .shield-container {
+      display: inline-flex;
+      position: relative;
+      margin-bottom: 16px;
+    }
+
+    .shield-icon {
+      color: var(--accent-red);
+      filter: drop-shadow(0 0 24px rgba(255,59,59,0.5));
+      animation: pulse-shield 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse-shield {
+      0%, 100% { filter: drop-shadow(0 0 16px rgba(255,59,59,0.4)); }
+      50%       { filter: drop-shadow(0 0 32px rgba(255,59,59,0.7)); }
+    }
+
+    .threat-label {
+      display: inline-block;
+      background: rgba(255,59,59,0.15);
+      border: 1px solid rgba(255,59,59,0.4);
+      color: var(--accent-red);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      border-radius: 20px;
+      padding: 4px 12px;
+      margin-bottom: 10px;
+    }
+
+    .threat-label.threat--phishing {
+      background: rgba(255,140,0,0.12);
+      border-color: rgba(255,140,0,0.4);
+      color: var(--accent-orange);
+    }
+
+    .threat-label.threat--clickfix {
+      background: rgba(139,92,246,0.12);
+      border-color: rgba(139,92,246,0.4);
+      color: #a78bfa;
+    }
+
+    .threat-headline {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+
+    .threat-description {
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.6;
+      max-width: 380px;
+      margin: 0 auto;
+    }
+
+    /* ── URL box ── */
+    .url-box {
+      background: rgba(255,59,59,0.07);
+      border: 1px solid rgba(255,59,59,0.2);
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 28px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .url-box.url-box--phishing {
+      background: rgba(255,140,0,0.07);
+      border-color: rgba(255,140,0,0.2);
+    }
+
+    .url-box.url-box--clickfix {
+      background: rgba(139,92,246,0.07);
+      border-color: rgba(139,92,246,0.2);
+    }
+
+    .url-icon {
+      flex-shrink: 0;
+      color: var(--accent-red);
+    }
+
+    .url-text {
+      font-family: "SF Mono", "Consolas", monospace;
+      font-size: 12px;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .url-source {
+      font-size: 11px;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+
+    /* ── Actions ── */
+    .actions {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .btn-primary {
+      width: 100%;
+      height: 48px;
+      padding: 0 13px;
+      background: var(--accent-green);
+      border: none;
+      border-radius: 8px;
+      color: #080808;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+
+    .btn-primary:hover { opacity: 0.9; }
+    .btn-primary:active { transform: scale(0.99); }
+
+    .btn-bypass {
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-size: 12px;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
+      transition: color 0.15s;
+    }
+
+    .btn-bypass:hover { color: var(--text); }
+    .btn-bypass:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .bypass-hint {
+      font-size: 11px;
+      color: var(--muted);
+      opacity: 0.7;
+    }
+
+    /* ── Detail section ── */
+    .detail-section {
+      margin-top: 28px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+    }
+
+    .detail-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    .detail-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .detail-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent-red);
+      flex-shrink: 0;
+      margin-top: 5px;
+    }
+
+    .detail-text {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+
+<div class="card">
+
+  <!-- Brand header -->
+  <div class="header">
+    <div class="brand">
+      <svg class="brand-icon" viewBox="0 0 24 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 1L2 5v9c0 6.35 4.25 12.3 10 14 5.75-1.7 10-7.65 10-14V5L12 1z" fill="currentColor" opacity="0.2"/>
+        <path d="M12 1L2 5v9c0 6.35 4.25 12.3 10 14 5.75-1.7 10-7.65 10-14V5L12 1z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        <path d="M8 14l3 3 5-6" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="brand-name">Hound</span>
+    </div>
+  </div>
+
+  <!-- Threat hero -->
+  <div class="threat-hero">
+    <div class="shield-container">
+      <svg class="shield-icon" width="72" height="84" viewBox="0 0 72 84" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M36 3L6 15v27c0 19.05 12.75 36.9 30 42 17.25-5.1 30-22.95 30-42V15L36 3z" fill="currentColor" opacity="0.15"/>
+        <path d="M36 3L6 15v27c0 19.05 12.75 36.9 30 42 17.25-5.1 30-22.95 30-42V15L36 3z" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/>
+        <path d="M36 30v12M36 48h.01" stroke="white" stroke-width="3" stroke-linecap="round"/>
+      </svg>
+    </div>
+
+    <div class="threat-label" id="threatLabel">THREAT DETECTED</div>
+    <h1 class="threat-headline" id="threatHeadline">Dangerous Site Blocked</h1>
+    <p class="threat-description" id="threatDescription">
+      Hound blocked access to this site because it matched known threat patterns.
+    </p>
+  </div>
+
+  <!-- URL box -->
+  <div class="url-box" id="urlBox">
+    <svg class="url-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <circle cx="7" cy="7" r="6" stroke="currentColor" stroke-width="1.5"/>
+      <path d="M7 4v3.5L9 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+    <span class="url-text" id="urlText">Loading…</span>
+    <span class="url-source" id="urlSource"></span>
+  </div>
+
+  <!-- Actions -->
+  <div class="actions">
+    <button class="btn-primary" id="goBackBtn">← Go Back to Safety</button>
+    <button class="btn-bypass" id="bypassBtn" disabled>
+      I understand the risk, proceed anyway
+      <span id="bypassCountdown"> (10)</span>
+    </button>
+    <span class="bypass-hint" id="bypassHint">Countdown before bypass is enabled</span>
+  </div>
+
+  <!-- Detail section (populated dynamically) -->
+  <div class="detail-section" id="detailSection" style="display:none">
+    <div class="detail-title">Why was this blocked?</div>
+    <div id="detailList"></div>
+  </div>
+
+  <!-- Footer -->
+  <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); text-align: center;">
+    <span style="font-size: 11px; color: var(--muted); opacity: 0.7;">
+      Protected by Hound — Behavioral endpoint security
+    </span>
+  </div>
+
+</div>
+
+<script>
+(async function () {
+  'use strict';
+
+  // ── Read threat data from session storage ───────────────────────────────────
+
+  const params = new URLSearchParams(window.location.search);
+  const tabId = params.get('tabId');
+
+  let blockedData = null;
+  if (tabId) {
+    try {
+      const stored = await chrome.storage.session.get(`blocked_${tabId}`);
+      blockedData = stored[`blocked_${tabId}`] || null;
+    } catch {
+      // session storage unavailable
+    }
+  }
+
+  // ── Populate UI ─────────────────────────────────────────────────────────────
+
+  const threatLabel       = document.getElementById('threatLabel');
+  const threatHeadline    = document.getElementById('threatHeadline');
+  const threatDescription = document.getElementById('threatDescription');
+  const urlBox            = document.getElementById('urlBox');
+  const urlText           = document.getElementById('urlText');
+  const urlSource         = document.getElementById('urlSource');
+  const detailSection     = document.getElementById('detailSection');
+  const detailList        = document.getElementById('detailList');
+  const goBackBtn         = document.getElementById('goBackBtn');
+  const bypassBtn         = document.getElementById('bypassBtn');
+  const bypassCountdown   = document.getElementById('bypassCountdown');
+  const bypassHint        = document.getElementById('bypassHint');
+
+  let blockedUrl = '';
+
+  if (blockedData) {
+    const { url, threat } = blockedData;
+    blockedUrl = url;
+
+    // Display URL
+    try { urlText.textContent = new URL(url).hostname + new URL(url).pathname; }
+    catch { urlText.textContent = url.slice(0, 60); }
+
+    if (threat.source) urlSource.textContent = threat.source;
+
+    // Threat-type-specific styling and copy
+    const type = threat.displayType || threat.threatType || 'THREAT';
+
+    if (type.includes('CLICKFIX')) {
+      threatLabel.textContent = 'CLICKFIX ATTACK';
+      threatLabel.classList.add('threat--clickfix');
+      urlBox.classList.add('url-box--clickfix');
+      threatHeadline.textContent = 'Social Engineering Attack Blocked';
+      threatDescription.textContent = 'This page was attempting to trick you into running malicious commands on your computer by disguising them as a CAPTCHA or browser verification step.';
+      addDetail('The page contained clipboard injection patterns commonly used to distribute malware');
+      addDetail('ClickFix attacks often target macOS users by mimicking legitimate verification pages');
+      addDetail('Running any command from this page could compromise your system');
+    } else if (type.includes('PHISHING')) {
+      threatLabel.textContent = 'PHISHING SITE';
+      threatLabel.classList.add('threat--phishing');
+      urlBox.classList.add('url-box--phishing');
+      document.querySelector('.url-icon').style.color = 'var(--accent-orange)';
+      threatHeadline.textContent = 'Phishing Site Blocked';
+      threatDescription.textContent = 'This site shows signs of credential harvesting. It may be impersonating a legitimate service to steal your passwords or personal information.';
+      if (threat.detail) {
+        threat.detail.split(', ').forEach((s) => addDetail(formatSignal(s)));
+      }
+    } else if (type.includes('MALWARE')) {
+      threatLabel.textContent = 'MALWARE';
+      threatHeadline.textContent = 'Malware Site Blocked';
+      threatDescription.textContent = 'Google Safe Browsing flagged this URL as a known malware distribution site. Visiting this page could infect your computer with malicious software.';
+    } else {
+      threatHeadline.textContent = 'Suspicious Site Blocked';
+      threatDescription.textContent = 'This site was flagged as potentially dangerous based on security analysis.';
+      if (threat.detail) addDetail(threat.detail);
+    }
+
+    if (detailList.children.length > 0) detailSection.style.display = 'block';
+  } else {
+    urlText.textContent = 'URL not available';
+    threatHeadline.textContent = 'Threat Blocked';
+    threatDescription.textContent = 'Hound blocked a potentially dangerous site.';
+  }
+
+  function addDetail(text) {
+    if (!text) return;
+    const item = document.createElement('div');
+    item.className = 'detail-item';
+    item.innerHTML = `<div class="detail-dot"></div><div class="detail-text">${escapeHtml(text)}</div>`;
+    detailList.appendChild(item);
+  }
+
+  function formatSignal(signal) {
+    const map = {
+      domain_squatting:       'Domain appears to be impersonating a well-known brand',
+      login_verify_combo:     'URL contains suspicious login/verify path combination',
+      excessive_subdomains:   'Unusually high number of subdomains (evasion tactic)',
+      long_number_in_hostname:'Long numeric string in hostname (automated/evasion tactic)',
+      password_request:       'Page prompts for passwords with suspicious language',
+      account_suspended_lure: 'Page claims account suspension (common phishing lure)',
+      urgency_language:       'Page uses urgent language to pressure action',
+      unusual_activity_lure:  'Page claims unusual account activity (common phishing lure)',
+    };
+    return map[signal] || signal.replace(/_/g, ' ');
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // ── Go back button ──────────────────────────────────────────────────────────
+
+  goBackBtn.addEventListener('click', () => {
+    if (history.length > 1) {
+      history.go(-2); // go back past the warning page itself
+    } else {
+      window.location.href = 'chrome://newtab';
+    }
+  });
+
+  // ── Bypass countdown ────────────────────────────────────────────────────────
+
+  let countdown = 10;
+
+  const timer = setInterval(() => {
+    countdown--;
+    if (countdown <= 0) {
+      clearInterval(timer);
+      bypassBtn.disabled = false;
+      bypassCountdown.textContent = '';
+      bypassHint.textContent = 'You chose to proceed — Hound cannot protect you on this page.';
+    } else {
+      bypassCountdown.textContent = ` (${countdown})`;
+    }
+  }, 1000);
+
+  bypassBtn.addEventListener('click', async () => {
+    if (bypassBtn.disabled) return;
+    if (!blockedUrl) return;
+
+    // Tell service worker to allow this URL for 30s
+    await chrome.runtime.sendMessage({ type: 'BYPASS_URL', url: blockedUrl });
+
+    // Navigate to the original URL
+    window.location.href = blockedUrl;
+  });
+
+})();
+</script>
+
+</body>
+</html>

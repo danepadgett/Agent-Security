@@ -1,0 +1,12 @@
+{
+  "name": "hound-extension",
+  "version": "0.1.0",
+  "description": "Hound browser extension for Chrome",
+  "private": true,
+  "scripts": {
+    "generate-icons": "node scripts/generate-icons.js"
+  },
+  "dependencies": {
+    "sharp": "^0.33.0"
+  }
+}

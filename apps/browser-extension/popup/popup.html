@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hound</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="popup">
+
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <img src="../icons/icon-32.png" alt="Hound" class="header-icon" />
+        <span class="header-title">Hound</span>
+      </div>
+      <button class="settings-btn" id="settingsBtn" title="Settings">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M6.5 1h3l.5 1.5 1.5.87 1.5-.5 2.1 2.1-.5 1.5.87 1.5L17 8v3l-1.5.5-.87 1.5.5 1.5-2.1 2.1-1.5-.5-1.5.87L9.5 18h-3l-.5-1.5-1.5-.87-1.5.5L1 14.1l.5-1.5-.87-1.5L-.5 10V7l1.5-.5.87-1.5-.5-1.5L2.9 1.4l1.5.5 1.5-.87L6.5 0z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          <circle cx="8" cy="8.5" r="2" stroke="currentColor" stroke-width="1.5"/>
+        </svg>
+      </button>
+    </header>
+
+    <!-- Main view -->
+    <div id="mainView">
+
+      <!-- Status card -->
+      <div class="status-card" id="statusCard">
+        <div class="status-shield">
+          <svg class="shield-svg" id="shieldSvg" width="48" height="56" viewBox="0 0 48 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M24 2L4 10v18c0 12.7 8.5 24.6 20 28 11.5-3.4 20-15.3 20-28V10L24 2z" fill="currentColor" opacity="0.15"/>
+            <path d="M24 2L4 10v18c0 12.7 8.5 24.6 20 28 11.5-3.4 20-15.3 20-28V10L24 2z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+            <path class="shield-check" d="M15 28l6 6 12-12" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="status-info">
+          <div class="status-label" id="statusLabel">Protected</div>
+          <div class="status-sublabel" id="statusSublabel">Monitoring all web traffic</div>
+        </div>
+      </div>
+
+      <!-- Stats row -->
+      <div class="stats-row">
+        <div class="stat-item">
+          <div class="stat-value" id="statChecked">0</div>
+          <div class="stat-label">Checked today</div>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat-item">
+          <div class="stat-value stat-value--threat" id="statBlocked">0</div>
+          <div class="stat-label">Blocked today</div>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat-item">
+          <div class="stat-value" id="statAllTime">0</div>
+          <div class="stat-label">All time</div>
+        </div>
+      </div>
+
+      <!-- Desktop agent status -->
+      <div class="desktop-row" id="desktopRow">
+        <div class="desktop-dot" id="desktopDot"></div>
+        <span class="desktop-label" id="desktopLabel">Desktop agent: checking…</span>
+      </div>
+
+      <!-- Recent blocks -->
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Recent Blocks</span>
+          <span class="section-count" id="recentCount">0</span>
+        </div>
+        <div class="recent-list" id="recentList">
+          <div class="empty-state">No threats blocked yet.<br/>Stay safe out there.</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Settings view (hidden by default) -->
+    <div id="settingsView" class="hidden">
+      <div class="settings-header">
+        <button class="back-btn" id="backBtn">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Settings
+        </button>
+      </div>
+
+      <div class="settings-list">
+        <label class="setting-row">
+          <div class="setting-info">
+            <span class="setting-name">ClickFix Detection</span>
+            <span class="setting-desc">Detect clipboard injection attacks</span>
+          </div>
+          <div class="toggle" id="toggleClickfix">
+            <div class="toggle-thumb"></div>
+          </div>
+        </label>
+
+        <label class="setting-row">
+          <div class="setting-info">
+            <span class="setting-name">Phishing Heuristics</span>
+            <span class="setting-desc">Behavioral phishing page analysis</span>
+          </div>
+          <div class="toggle" id="togglePhishing">
+            <div class="toggle-thumb"></div>
+          </div>
+        </label>
+
+        <label class="setting-row">
+          <div class="setting-info">
+            <span class="setting-name">Notifications</span>
+            <span class="setting-desc">Show alerts when threats are blocked</span>
+          </div>
+          <div class="toggle" id="toggleNotifications">
+            <div class="toggle-thumb"></div>
+          </div>
+        </label>
+
+        <div class="setting-row setting-row--input">
+          <div class="setting-info">
+            <span class="setting-name">Google Safe Browsing API Key</span>
+            <span class="setting-desc">Optional — enables cloud threat lookup</span>
+          </div>
+          <input
+            type="password"
+            class="api-key-input"
+            id="gsbApiKey"
+            placeholder="AIza..."
+            autocomplete="off"
+          />
+        </div>
+
+        <button class="save-btn" id="saveBtn">Save Settings</button>
+        <div class="save-feedback" id="saveFeedback"></div>
+      </div>
+    </div>
+
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
