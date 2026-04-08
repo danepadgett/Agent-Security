@@ -1,18 +1,21 @@
 # Hound
 
-Behavioral endpoint protection for macOS. Free, forever.
+Execution visibility for developers on macOS. Free, forever.
 
-Hound is a local-first EDR (Endpoint Detection and Response) agent for macOS. It watches for attack patterns in real time, explains every incident in plain English, and responds automatically — or in simulation mode for safe testing. No cloud dependency for core detection. No subscription. No telemetry without consent.
+Hound gives developers complete transparency into what their tools actually do. Running a build, installing a package, executing a script? Hound is silent — unless something steps outside expected scope. Credential access, unexpected outbound network, persistence installation, or privilege escalation generate a Hound Trace: a permanent, plain-English record of what happened and what was done.
+
+No noise. No cloud dependency. No subscription.
 
 ---
 
 ## What it does
 
-- **Behavioral detection** — 45 detection functions covering ~95% of MITRE ATT&CK user-space techniques. Catches attack patterns that signature-based tools miss.
-- **Incident correlation** — Groups atomic signals into scored attack chains with MITRE technique tagging.
+- **Scope violation detection** — Silence for clean builds (`npm install`, `cargo build`, `git pull`). Alerts only when tools do something outside expected scope: credential access, unexpected network, persistence install, privilege escalation.
+- **Hound Traces** — Every scope violation generates a permanent plain-English record: what happened, what was targeted, how it was caught, what was done. Stored locally, never sent anywhere.
+- **270+ detection tests** — ~95% MITRE ATT&CK user-space coverage. Catches supply chain attacks, fileless malware, and novel threats that signature scanners miss.
+- **Execution context** — Knows whether a process came from your terminal, IDE, CI pipeline, or a script. Uses context to sharpen detection accuracy.
 - **Automated response** — Kills malicious processes and quarantines files (simulation mode by default).
-- **Plain-English explanations** — Every incident gets a deterministic StoryLine narrative. Optional AI enhancement via Claude Haiku (bring your own API key).
-- **Desktop UI** — Tauri + React app with incident inbox, history, health dashboard, and settings.
+- **Desktop UI** — Tauri + React app with incident inbox, Hound Trace history, and settings.
 - **Local-first** — Everything runs on your Mac. No cloud required for detection or response.
 
 ---
@@ -40,7 +43,7 @@ cd agents/core-agent
 cargo run --bin core-agent
 ```
 
-The agent starts in **simulation mode** by default — it detects and logs threats but takes no real action. You'll see output like:
+The agent starts in **simulation mode** by default — it detects and logs scope violations but takes no real action. You'll see output like:
 
 ```
 Core Agent Starting...
@@ -52,7 +55,7 @@ Watching directories:
 Startup baseline established. Alerting enabled on next loop.
 ```
 
-Telemetry is written to `runtime/logs/agent-events.jsonl`.
+Telemetry is written to `runtime/logs/agent-events.jsonl`. Clean executions produce no output.
 
 ### 3. Run the desktop UI
 
@@ -65,6 +68,22 @@ npm run tauri dev
 ```
 
 The UI connects to the agent's log file automatically. On first launch you'll see the onboarding flow — grant Full Disk Access when prompted for full coverage.
+
+---
+
+## Core philosophy
+
+**Silence unless something actually matters.**
+
+| Event | Output |
+|---|---|
+| `npm install` | Nothing |
+| `cargo build --release` | Nothing |
+| `git pull origin main` | Nothing |
+| postinstall script accessing `~/.aws/credentials` | **Alert** |
+| build tool installing a LaunchAgent | **Alert** |
+| `curl \| bash` from a CI runner | **Alert** |
+| dependency connecting to an unknown IP on port 4444 | **Alert** |
 
 ---
 
@@ -113,7 +132,11 @@ The response whitelist (`[whitelist]`) is separate — it means "detect but don'
 ```
 Sensor Layer        File | Process | Network | Persistence monitors
       ↓
-Detection Engine    45 functions, ~95% MITRE ATT&CK user-space coverage
+Execution Context   ExecutionSource (Terminal/IDE/CI/Script/Unknown)
+      ↓
+Detection Engine    270 tests, ~95% MITRE ATT&CK user-space coverage
+  + Scope Violation  Credential access, unexpected network, persistence,
+                     privilege escalation, download-and-execute
       ↓
 Correlation Engine  Attack chain scoring, incident grouping, MITRE tagging
       ↓
@@ -121,26 +144,38 @@ Response Engine     Guardrails → Whitelist → Kill / Quarantine / Simulate
       ↓
          ┌──────────────────────┬──────────────────────┐
       AI Layer              UI Layer (Tauri + React)
-   StoryLine                Inbox model, history,
-   (deterministic           health dashboard,
-   + optional Claude)       settings
+   Hound Trace              Trace Feed dashboard,
+   (deterministic           Inbox, History,
+   + optional Claude)       Settings
 ```
+
+### Scope violation detection
+
+| Violation type | Examples |
+|---|---|
+| Credential access | `~/.ssh/id_*`, `~/.aws/credentials`, `~/.kube/config`, Keychain dump |
+| Unexpected network | Interpreter making inline outbound calls, curl\|bash |
+| Persistence install | LaunchAgent/Daemon write, `launchctl load`, crontab modification |
+| Privilege escalation | `sudo bash`, `sudo su`, `chmod +s`, `chown root` |
+| Suspicious download | `curl \| bash`, `wget \| sh`, download-and-execute patterns |
 
 ### Detection coverage
 
 | Tactic | Key techniques |
 |---|---|
 | Execution | Downloaded file execution, interpreter abuse, curl-pipe-bash, LOLBin execution |
-| Persistence | LaunchAgent/Daemon modification, crontab, login hooks |
+| Persistence | LaunchAgent/Daemon modification, crontab, login hooks, dock persistence, at jobs |
 | Privilege Escalation | sudo abuse, setuid/setgid operations |
-| Defense Evasion | File type mismatch, indicator removal, security tool tampering |
-| Credential Access | Keychain access, browser credential theft, SSH key access |
+| Defense Evasion | File type mismatch, indicator removal, security tool tampering, defense evasion active |
+| Credential Access | Keychain access, browser credential theft, SSH key access, cloud credentials, keychain dump |
 | Discovery | System/network/filesystem recon chains |
-| Lateral Movement | SSH lateral movement |
-| Collection | Data staging, screen capture, suspicious archive creation |
-| C2 | Beaconing pattern detection (suppresses Apple/Google IPs) |
-| Exfiltration | Upload command detection |
+| Lateral Movement | SSH lateral movement, privilege escalation chains |
+| Collection | Data staging, screen capture, suspicious archive creation, clipboard monitoring |
+| C2 | Beaconing pattern detection, Tor connection, suspicious port usage |
+| Exfiltration | Upload command detection, rclone, cloud storage upload, sensitive directory archive |
 | Impact | Ransomware behavior (extension wave, ransom note, backup tampering) |
+| Supply Chain | Binary integrity violations, typosquatting, CI config tampering, package postinstall download |
+| Cryptomining | Miner process/args detection, mining pool connections |
 
 ### Agent self-protection
 
@@ -158,7 +193,9 @@ hound/
 ├── agents/core-agent/          # Rust EDR engine
 │   ├── src/
 │   │   ├── main.rs             # Entry point, main loop
-│   │   ├── detections.rs       # 45 detection functions, 165 tests
+│   │   ├── execution_context.rs # ExecutionSource, ExecutionContext, ExecutionTracker
+│   │   ├── scope_violation.rs  # Developer-focused scope violation detection
+│   │   ├── detections.rs       # All detection functions, 270 tests
 │   │   ├── incidents.rs        # Incident correlation engine
 │   │   ├── response.rs         # Response engine with guardrails
 │   │   ├── processes.rs        # Process monitoring
@@ -173,10 +210,11 @@ hound/
 │   ├── src/
 │   │   ├── App.tsx             # Main app, event subscription, state
 │   │   └── components/
+│   │       ├── Dashboard.tsx   # Trace Feed (State A: all clear / State B: violations)
 │   │       ├── Onboarding.tsx  # 5-screen first-run flow
 │   │       ├── AuthScreen.tsx  # Sign-up / sign-in / skip
 │   │       ├── IncidentFeed.tsx
-│   │       ├── StoryLine.tsx   # Plain-English incident narrative
+│   │       ├── HoundTrace.tsx  # Plain-English incident narrative
 │   │       ├── HistoryView.tsx
 │   │       ├── HealthDashboard.tsx
 │   │       └── SettingsView.tsx
@@ -218,7 +256,7 @@ cargo run --bin watchdog
 
 ## Testing
 
-### Unit tests (165 tests, all passing)
+### Unit tests (270 tests, all passing)
 
 ```bash
 cd agents/core-agent
@@ -272,9 +310,9 @@ cp apps/desktop/.env.example apps/desktop/.env
 # edit .env with your values
 ```
 
-### AI-enhanced StoryLines (optional)
+### AI-enhanced Hound Traces (optional)
 
-Every incident gets a deterministic plain-English narrative without any API key. To enable Claude Haiku enhancement: open the desktop app → Settings → add your Anthropic API key. It's stored in macOS Keychain, never on disk.
+Every incident gets a deterministic plain-English Hound Trace without any API key. To enable Claude Haiku enhancement: open the desktop app → Settings → add your Anthropic API key. It's stored in macOS Keychain, never on disk.
 
 ---
 
@@ -314,7 +352,7 @@ User-space ceiling is ~95% meaningful MITRE coverage.
 
 - [ ] 24-hour performance test and false positive audit on real machines
 - [ ] End-to-end fresh state test
-- [ ] Beta with 10–20 real users
+- [ ] Beta with 10–20 real developers
 - [ ] Apple notarization
 - [ ] Auto-update (Tauri updater)
 - [ ] Apple Endpoint Security Framework integration (kernel-level visibility)

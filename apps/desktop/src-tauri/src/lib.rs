@@ -568,13 +568,13 @@ Be direct and clear. Avoid jargon. Do not repeat the raw technical terms — tra
     Ok(explanation.to_string())
 }
 
-// ── StoryLine ─────────────────────────────────────────────────────────────────
+// ── HoundTrace ─────────────────────────────────────────────────────────────────
 
-fn storylines_file_path() -> Result<PathBuf, String> {
+fn hound_traces_file_path() -> Result<PathBuf, String> {
     Ok(project_root()?
         .join("runtime")
         .join("logs")
-        .join("storylines.jsonl"))
+        .join("hound_traces.jsonl"))
 }
 
 fn ack_v2_file_path() -> Result<PathBuf, String> {
@@ -590,7 +590,7 @@ fn unack_incidents_file_path() -> Result<PathBuf, String> {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
-struct StoryLine {
+struct HoundTrace {
     incident_id: String,
     timestamp: String,
     headline: String,
@@ -604,7 +604,7 @@ struct StoryLine {
     ai_enhanced: bool,
 }
 
-fn generate_storyline_from_incident(incident: &Value, simulation_mode: bool) -> StoryLine {
+fn generate_hound_trace_from_incident(incident: &Value, simulation_mode: bool) -> HoundTrace {
     let incident_id = incident.get("id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
     let timestamp = chrono::Utc::now().to_rfc3339();
 
@@ -947,7 +947,7 @@ fn generate_storyline_from_incident(incident: &Value, simulation_mode: bool) -> 
         ),
     };
 
-    StoryLine {
+    HoundTrace {
         incident_id,
         timestamp,
         headline,
@@ -962,19 +962,19 @@ fn generate_storyline_from_incident(incident: &Value, simulation_mode: bool) -> 
     }
 }
 
-fn save_storyline_inner(storyline: &StoryLine) -> Result<(), String> {
-    let path = storylines_file_path()?;
+fn save_hound_trace_inner(trace: &HoundTrace) -> Result<(), String> {
+    let path = hound_traces_file_path()?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("failed to create dir: {e}"))?;
     }
-    let line = serde_json::to_string(storyline).map_err(|e| format!("serialize error: {e}"))?;
+    let line = serde_json::to_string(trace).map_err(|e| format!("serialize error: {e}"))?;
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&path)
-        .map_err(|e| format!("failed to open storylines file: {e}"))?;
-    writeln!(file, "{}", line).map_err(|e| format!("failed to write storyline: {e}"))
+        .map_err(|e| format!("failed to open hound_traces file: {e}"))?;
+    writeln!(file, "{}", line).map_err(|e| format!("failed to write hound_trace: {e}"))
 }
 
 fn do_acknowledge_incident(incident_id: &str) -> Result<(), String> {
@@ -1019,16 +1019,16 @@ fn append_ack_v2(incident_id: &str, resolved_reason: &str) -> Result<(), String>
 }
 
 #[tauri::command]
-fn generate_storyline(incident_json: String) -> Result<Value, String> {
+fn generate_hound_trace(incident_json: String) -> Result<Value, String> {
     let incident: Value = serde_json::from_str(&incident_json)
         .map_err(|e| format!("failed to parse incident: {e}"))?;
     let sim_mode = read_simulation_mode_inner();
-    let storyline = generate_storyline_from_incident(&incident, sim_mode);
-    serde_json::to_value(&storyline).map_err(|e| format!("failed to serialize storyline: {e}"))
+    let hound_trace = generate_hound_trace_from_incident(&incident, sim_mode);
+    serde_json::to_value(&hound_trace).map_err(|e| format!("failed to serialize hound_trace: {e}"))
 }
 
 #[tauri::command]
-fn acknowledge_with_storyline(
+fn acknowledge_with_hound_trace(
     incident_json: String,
     resolved_reason: String,
 ) -> Result<Value, String> {
@@ -1049,25 +1049,25 @@ fn acknowledge_with_storyline(
     // 3. Remove from unacknowledged persistence (state transition: Inbox → Resolved)
     let _ = remove_unacknowledged_incident_inner(&incident_id);
 
-    // 4. Generate StoryLine
+    // 4. Generate Hound Trace
     let sim_mode = read_simulation_mode_inner();
-    let storyline = generate_storyline_from_incident(&incident, sim_mode);
+    let hound_trace = generate_hound_trace_from_incident(&incident, sim_mode);
 
-    // 5. Persist StoryLine to storylines.jsonl
-    save_storyline_inner(&storyline)?;
+    // 5. Persist Hound Trace to hound_traces.jsonl
+    save_hound_trace_inner(&hound_trace)?;
 
-    // 6. Return the StoryLine
-    serde_json::to_value(&storyline).map_err(|e| format!("failed to serialize: {e}"))
+    // 6. Return the Hound Trace
+    serde_json::to_value(&hound_trace).map_err(|e| format!("failed to serialize: {e}"))
 }
 
 #[tauri::command]
-fn get_storylines() -> Result<Vec<Value>, String> {
-    let path = storylines_file_path()?;
+fn get_hound_traces() -> Result<Vec<Value>, String> {
+    let path = hound_traces_file_path()?;
     if !path.exists() {
         return Ok(vec![]);
     }
     let contents = fs::read_to_string(&path)
-        .map_err(|e| format!("failed to read storylines: {e}"))?;
+        .map_err(|e| format!("failed to read hound_traces: {e}"))?;
     let mut result: Vec<Value> = contents
         .lines()
         .filter(|l| !l.trim().is_empty())
@@ -1868,9 +1868,9 @@ pub fn run() {
             explain_incident,
             get_whitelist,
             update_whitelist,
-            generate_storyline,
-            acknowledge_with_storyline,
-            get_storylines,
+            generate_hound_trace,
+            acknowledge_with_hound_trace,
+            get_hound_traces,
             get_acknowledged_records,
             save_unacknowledged_incident,
             sync_unacknowledged_incidents,

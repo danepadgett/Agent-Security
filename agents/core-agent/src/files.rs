@@ -30,6 +30,11 @@ pub fn tracked_directories() -> Vec<PathBuf> {
         // Credential access monitoring (T1552.004, T1552.001)
         PathBuf::from(format!("{home}/.ssh")),
         PathBuf::from(format!("{home}/.aws")),
+        // Cloud credential files (T1552.001 — Credentials in Files)
+        PathBuf::from(format!("{home}/.azure")),
+        PathBuf::from(format!("{home}/.config/gcloud")),
+        PathBuf::from(format!("{home}/.kube")),
+        PathBuf::from(format!("{home}/.docker")),
         // Login item persistence — BTM database (T1547.001)
         PathBuf::from("/var/db/com.apple.backgroundtaskmanagement"),
     ]

@@ -31,11 +31,11 @@ export type AgentStatus = {
   simulation_mode: boolean;
 };
 
-export type AppView = "incidents" | "health" | "settings" | "history" | "dark-web";
+export type AppView = "dashboard" | "incidents" | "history" | "dark-web" | "account";
 
 export type AiExplainState = "idle" | "loading" | "done" | "error";
 
-export type StoryLine = {
+export type HoundTrace = {
   incident_id: string;
   timestamp: string;
   headline: string;
@@ -47,6 +47,19 @@ export type StoryLine = {
   mitre_summary: string;
   verdict: string;
   ai_enhanced: boolean;
+};
+
+export type ExecutionSource = "terminal" | "ide" | "ci" | "script" | "unknown";
+
+export type ExecutionTrace = {
+  id: string;
+  timestamp: string | number;
+  command: string;
+  args: string;
+  source: ExecutionSource;
+  violation_kind: string | null; // null = clean execution
+  reason: string;
+  headline: string;
 };
 
 export type AcknowledgedRecord = {

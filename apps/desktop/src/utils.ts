@@ -77,7 +77,7 @@ export function severityColor(severity: Severity): string {
     case "critical": return "#ef4444";
     case "high": return "#f97316";
     case "medium": return "#eab308";
-    case "low": return "#22c55e";
+    case "low": return "#888888";
     default: return "#6b7280";
   }
 }

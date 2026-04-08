@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import type { Severity } from "../types";
-import { SevIcon } from "./icons";
+import { XIcon } from "./icons";
 
 export type ToastItem = {
   id: string;
@@ -32,24 +32,16 @@ function ToastCard({ toast, onDismiss }: { toast: ToastItem; onDismiss: (id: str
   }, [toast.id, onDismiss]);
 
   return (
-    <div
-      className="toast-card"
-      data-sev={toast.severity}
-      role="alert"
-    >
-      <span className="toast-icon">
-        <SevIcon severity={toast.severity} size={14} />
-      </span>
+    <div className={`toast toast--${toast.severity}`} role="alert">
       <div className="toast-body">
-        <span className="toast-label">New incident</span>
-        <span className="toast-title">{toast.title}</span>
+        <div className="toast-title">{toast.title}</div>
       </div>
       <button
-        className="toast-close"
+        className="toast-dismiss"
         onClick={() => onDismiss(toast.id)}
         aria-label="Dismiss"
       >
-        ✕
+        <XIcon size={12} />
       </button>
     </div>
   );

@@ -1,9 +1,17 @@
 mod baseline;
+mod binary_integrity;
 mod classify;
 mod command_features;
 mod command_patterns;
 mod config;
 mod config_integrity;
+mod dns_monitor;
+mod entropy;
+mod execution_context;
+mod cryptomining;
+mod exfiltration;
+mod filesystem_anomaly;
+mod lateral_movement;
 mod perf;
 mod detections;
 mod evidence;
@@ -20,6 +28,7 @@ mod processes;
 mod provenance;
 mod replay;
 mod response;
+mod scope_violation;
 mod state;
 
 use anyhow::Result;
@@ -140,6 +149,13 @@ fn main() -> Result<()> {
         println!(" - {}", dir.display());
     }
 
+    // ── Binary integrity baseline ──────────────────────────────────────────────
+    let mut binary_integrity = binary_integrity::BinaryIntegrityMonitor::new();
+    binary_integrity.load_or_create_baseline();
+
+    // ── DNS monitor ────────────────────────────────────────────────────────────
+    let mut dns_monitor = dns_monitor::DnsMonitor::new();
+
     let mut file_monitor = FileMonitor::new(&watch_dirs)?;
     let mut proc_sys = System::new();
     let mut known_processes = processes::snapshot_processes(&mut proc_sys)?;
@@ -156,6 +172,7 @@ fn main() -> Result<()> {
     let mut agent_state = AgentState::new();
     let mut persistence_monitor = PersistenceMonitor::new();
     let mut network_monitor = NetworkMonitor::new();
+    let mut filesystem_anomaly = filesystem_anomaly::FilesystemAnomalyDetector::new();
     let mut startup_completed = false;
     let mut loop_counter: u64 = 0;
 
@@ -171,6 +188,46 @@ fn main() -> Result<()> {
             println!("File event: kind={} path={}", event.kind, event.path.display());
             append_event(&event.telemetry_event)?;
             recent_file_events.push_back(FileEventRecord::from(event));
+
+            // Binary integrity check: if a monitored binary was replaced, alert immediately
+            let path_str = event.path.to_string_lossy();
+            if binary_integrity.is_monitored(path_str.as_ref()) {
+                if let Some(violation) = binary_integrity.check_path(path_str.as_ref()) {
+                    let integrity_event = TelemetryEvent::new(
+                        now,
+                        "alert_binary_integrity_violation",
+                        "core-agent/binary-integrity",
+                        serde_json::json!({
+                            "severity": "critical",
+                            "score": 99,
+                            "category": "supply_chain",
+                            "mitre_technique_id": "T1195.002",
+                            "reason": "A trusted binary has been replaced — possible supply chain compromise",
+                            "details": {
+                                "path": violation.path,
+                                "known_hash": violation.known_hash,
+                                "current_hash": violation.current_hash,
+                                "command": violation.path,
+                            }
+                        }),
+                    );
+                    println!("BINARY INTEGRITY VIOLATION: {}", violation.path);
+                    append_event(&integrity_event)?;
+                }
+            }
+        }
+
+        // ── Filesystem anomaly detection (ransomware, mass modification) ──────
+        {
+            let file_records: Vec<FileEventRecord> = file_events.iter()
+                .map(|e| FileEventRecord::from(e))
+                .collect();
+            let anomaly_alerts = filesystem_anomaly.process_events(&file_records, now);
+            for event in &anomaly_alerts {
+                println!("FILESYSTEM ANOMALY: {}", event.event_type);
+                append_event(event)?;
+                recent_detections.push_back(event.clone());
+            }
         }
 
         trim_recent_file_events(&mut recent_file_events, 300);
@@ -194,6 +251,34 @@ fn main() -> Result<()> {
                 event.process.parent_process_kind.as_deref().unwrap_or("unknown")
             );
             append_event(&event.telemetry_event)?;
+
+            // Binary integrity check on execution: catch replaced binaries that
+            // weren't flagged by a file event (e.g. installed before agent started).
+            if binary_integrity.is_monitored(&event.process.command) {
+                if let Some(violation) = binary_integrity.check_path(&event.process.command) {
+                    let integrity_event = TelemetryEvent::new(
+                        now,
+                        "alert_binary_integrity_violation",
+                        "core-agent/binary-integrity",
+                        serde_json::json!({
+                            "severity": "critical",
+                            "score": 99,
+                            "category": "supply_chain",
+                            "mitre_technique_id": "T1195.002",
+                            "reason": "A trusted binary that was just executed has a different hash than the baseline — possible supply chain compromise",
+                            "details": {
+                                "path": violation.path,
+                                "known_hash": violation.known_hash,
+                                "current_hash": violation.current_hash,
+                                "command": event.process.command,
+                                "pid": event.process.pid,
+                            }
+                        }),
+                    );
+                    println!("BINARY INTEGRITY VIOLATION ON EXEC: {}", violation.path);
+                    append_event(&integrity_event)?;
+                }
+            }
         }
 
         let recent_processes = process_events
@@ -212,11 +297,17 @@ fn main() -> Result<()> {
         perf.record_raw("process_monitor", t_proc.elapsed());
 
         if startup_completed {
-            // ── Persistence monitor (crontab + loginwindow hooks) ──────────────
+            // ── Persistence monitor (crontab + loginwindow hooks + dock + at jobs) ──
             let t_persist = std::time::Instant::now();
             let persistence_events = persistence_monitor.check_and_update(now);
             for event in &persistence_events {
                 println!("PERSISTENCE: {}", event.event_type);
+                append_event(event)?;
+            }
+            // DNS monitoring runs alongside persistence (similar polling cadence)
+            let dns_events = dns_monitor.check_and_update(now);
+            for event in &dns_events {
+                println!("DNS ALERT: {}", event.event_type);
                 append_event(event)?;
             }
             perf.record_raw("persistence_monitor", t_persist.elapsed());

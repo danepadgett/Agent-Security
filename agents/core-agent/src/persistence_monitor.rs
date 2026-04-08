@@ -1,6 +1,7 @@
 use crate::models::{AlertSeverity, TelemetryEvent};
 use chrono::{DateTime, Utc};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::process::Command;
 use std::time::UNIX_EPOCH;
 
@@ -14,6 +15,14 @@ pub struct PersistenceMonitor {
     /// Last-seen mtime of the BTM database file (seconds since UNIX epoch).
     /// `None` means the file did not exist or was unreadable at last check.
     last_btm_mtime: Option<u64>,
+    /// SHA256 of ~/Library/Preferences/com.apple.dock.plist content.
+    last_dock_plist_hash: Option<String>,
+    /// Set of known at-job filenames in /var/at/jobs/ at last check.
+    last_at_jobs: Option<std::collections::HashSet<String>>,
+    /// Last-seen resume hook value from com.apple.loginwindow.
+    last_resume_hook: Option<String>,
+    /// Last-seen sleep hook value from com.apple.loginwindow.
+    last_sleep_hook: Option<String>,
     initialized: bool,
 }
 
@@ -24,11 +33,15 @@ impl PersistenceMonitor {
             last_login_hook: None,
             last_logout_hook: None,
             last_btm_mtime: None,
+            last_dock_plist_hash: None,
+            last_at_jobs: None,
+            last_resume_hook: None,
+            last_sleep_hook: None,
             initialized: false,
         }
     }
 
-    /// Poll crontab, loginwindow hooks, and the BTM database file.
+    /// Poll crontab, loginwindow hooks, BTM database, dock plist, at jobs, and extended hooks.
     /// On the first call, baseline silently.
     /// On subsequent calls, emit alerts for any changes observed.
     pub fn check_and_update(&mut self, now: DateTime<Utc>) -> Vec<TelemetryEvent> {
@@ -36,7 +49,10 @@ impl PersistenceMonitor {
 
         let current_crontab = read_crontab();
         let (current_login_hook, current_logout_hook) = read_loginwindow_hooks();
+        let (current_resume_hook, current_sleep_hook) = read_extended_loginwindow_hooks();
         let current_btm_mtime = read_btm_mtime();
+        let current_dock_hash = read_dock_plist_hash();
+        let current_at_jobs = read_at_jobs();
 
         if self.initialized {
             // ── Crontab ───────────────────────────────────────────────────────
@@ -141,10 +157,99 @@ impl PersistenceMonitor {
             }
         }
 
+        if self.initialized {
+            // ── Dock persistence (T1547) ──────────────────────────────────────
+            // Some malware persists by injecting itself into the macOS Dock.
+            // Any modification to com.apple.dock.plist is worth flagging.
+            let dock_changed = match (&self.last_dock_plist_hash, &current_dock_hash) {
+                (None, Some(_)) => false, // First time seeing the file — baseline
+                (Some(prev), Some(curr)) => prev != curr,
+                _ => false,
+            };
+            if dock_changed {
+                events.push(build_alert(
+                    now,
+                    "alert_dock_persistence",
+                    AlertSeverity::Medium,
+                    "persistence",
+                    "macOS Dock configuration was modified — possible Dock persistence",
+                    json!({
+                        "mitre_technique": "T1547",
+                        "plist_path": format!("{}/Library/Preferences/com.apple.dock.plist",
+                            std::env::var("HOME").unwrap_or_default()),
+                        "reason": "com.apple.dock.plist content hash changed — a new Dock item may have been added by malware",
+                    }),
+                ));
+            }
+
+            // ── At-job persistence (T1053.002) ────────────────────────────────
+            // `at` jobs are a real but less-used persistence mechanism. Watch
+            // /var/at/jobs/ for new scheduled tasks.
+            if let (Some(prev_jobs), Some(curr_jobs)) = (&self.last_at_jobs, &current_at_jobs) {
+                let new_jobs: Vec<&String> = curr_jobs.difference(prev_jobs).collect();
+                for job in new_jobs {
+                    events.push(build_alert(
+                        now,
+                        "alert_at_job_created",
+                        AlertSeverity::High,
+                        "persistence",
+                        "New at-job created in /var/at/jobs — scheduled persistence mechanism",
+                        json!({
+                            "mitre_technique": "T1053.002",
+                            "job_name": job,
+                            "reason": "New file appeared in /var/at/jobs/ — attacker may be using at for delayed execution",
+                        }),
+                    ));
+                }
+            }
+
+            // ── ResumeHook ────────────────────────────────────────────────────
+            if let Some(hook) = &current_resume_hook {
+                if self.last_resume_hook.as_deref() != Some(hook.as_str()) {
+                    events.push(build_alert(
+                        now,
+                        "alert_login_hook_installed",
+                        AlertSeverity::High,
+                        "persistence",
+                        "A ResumeHook was installed in com.apple.loginwindow",
+                        json!({
+                            "mitre_technique": "T1037.002",
+                            "hook_type": "ResumeHook",
+                            "hook_value": hook,
+                            "reason": "ResumeHook key detected or changed in com.apple.loginwindow defaults domain",
+                        }),
+                    ));
+                }
+            }
+
+            // ── SleepHook ─────────────────────────────────────────────────────
+            if let Some(hook) = &current_sleep_hook {
+                if self.last_sleep_hook.as_deref() != Some(hook.as_str()) {
+                    events.push(build_alert(
+                        now,
+                        "alert_login_hook_installed",
+                        AlertSeverity::High,
+                        "persistence",
+                        "A SleepHook was installed in com.apple.loginwindow",
+                        json!({
+                            "mitre_technique": "T1037.002",
+                            "hook_type": "SleepHook",
+                            "hook_value": hook,
+                            "reason": "SleepHook key detected or changed in com.apple.loginwindow defaults domain",
+                        }),
+                    ));
+                }
+            }
+        }
+
         self.last_crontab = current_crontab;
         self.last_login_hook = current_login_hook;
         self.last_logout_hook = current_logout_hook;
         self.last_btm_mtime = current_btm_mtime;
+        self.last_dock_plist_hash = current_dock_hash;
+        self.last_at_jobs = current_at_jobs;
+        self.last_resume_hook = current_resume_hook;
+        self.last_sleep_hook = current_sleep_hook;
         self.initialized = true;
 
         events
@@ -178,6 +283,45 @@ fn read_loginwindow_hooks() -> (Option<String>, Option<String>) {
     let logout_hook = extract_hook_value(&text, "LogoutHook");
 
     (login_hook, logout_hook)
+}
+
+/// Read ResumeHook and SleepHook from com.apple.loginwindow.
+/// These are less common than Login/LogoutHooks but used by some malware.
+fn read_extended_loginwindow_hooks() -> (Option<String>, Option<String>) {
+    let output = Command::new("defaults")
+        .args(["read", "com.apple.loginwindow"])
+        .output();
+
+    let Ok(output) = output else {
+        return (None, None);
+    };
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let resume_hook = extract_hook_value(&text, "ResumeHook");
+    let sleep_hook = extract_hook_value(&text, "SleepHook");
+    (resume_hook, sleep_hook)
+}
+
+/// Compute SHA256 of ~/Library/Preferences/com.apple.dock.plist.
+/// Returns None if the file does not exist or cannot be read.
+fn read_dock_plist_hash() -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    let path = format!("{home}/Library/Preferences/com.apple.dock.plist");
+    let content = std::fs::read(&path).ok()?;
+    let hash = Sha256::digest(&content);
+    Some(format!("{:x}", hash))
+}
+
+/// List filenames in /var/at/jobs/ — used to detect new at-job entries.
+/// Returns None if the directory cannot be read (normal if at is not used).
+fn read_at_jobs() -> Option<std::collections::HashSet<String>> {
+    let entries = std::fs::read_dir("/var/at/jobs").ok()?;
+    let names = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| !n.starts_with('.'))
+        .collect();
+    Some(names)
 }
 
 /// Return the mtime of the BTM database file as seconds since the UNIX epoch,
@@ -281,6 +425,10 @@ mod tests {
             last_login_hook: None,
             last_logout_hook: None,
             last_btm_mtime: Some(1_700_000_000),
+            last_dock_plist_hash: None,
+            last_at_jobs: None,
+            last_resume_hook: None,
+            last_sleep_hook: None,
             initialized: true,
         };
 

@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Hound — Behavioral endpoint security for macOS</title>
-<meta name="description" content="Hound watches how programs behave on your Mac and stops attacks before they cause damage. Free, local-first, no account required.">
+<title>Hound — Execution visibility for developers</title>
+<meta name="description" content="Hound gives developers complete visibility into what their tools actually do. Silence for clean builds. Instant alerts for credential access, unexpected network calls, and scope violations.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 52 52'><path d='M26 4L7 14v11c0 11.4 8.15 22.07 19.56 24.67C37.85 47.07 45 36.4 45 25V14L26 4z' fill='rgba(255,255,255,0.10)' stroke='%23ffffff' stroke-width='2.5' stroke-linejoin='round'/><path d='M19 26l5 5 9-9' stroke='%23ffffff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/></svg>">
 <style>
   :root {
@@ -31,6 +31,7 @@
     font-size: 16px;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
+    padding-top: 56px;
   }
   a { color: inherit; text-decoration: none; }
 
@@ -176,21 +177,37 @@
 
   /* HERO */
   .hero {
-    min-height: 100vh;
+    min-height: calc(100vh - 56px);
     display: flex;
     align-items: center;
-    padding-top: 56px;
     position: relative;
     overflow: hidden;
   }
-  .hero-split {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 64px;
-    align-items: center;
-    width: 100%;
+  .hero-centered {
+    text-align: center;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 80px 0 64px;
   }
-  .hero-left { padding: 48px 0; }
+  .hero-centered h1 {
+    font-size: 58px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.08;
+    margin-bottom: 24px;
+    color: #fff;
+  }
+  .hero-centered p {
+    font-size: 18px;
+    color: var(--muted);
+    line-height: 1.65;
+    margin-bottom: 36px;
+  }
+  .hero-buttons { justify-content: center; }
+  @media (max-width: 768px) {
+    .hero-centered h1 { font-size: 38px; }
+    .hero-centered p { font-size: 16px; }
+  }
   .badge-pill {
     display: inline-flex;
     align-items: center;
@@ -229,35 +246,6 @@
     margin-bottom: 20px;
   }
   .hero-fine { font-size: 12px; color: var(--faint); }
-  .hero-right {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .pipeline-svg-wrap {
-    width: 100%;
-    max-width: 520px;
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 32px;
-    position: relative;
-    overflow: hidden;
-  }
-  .pipeline-label {
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--faint);
-    margin-bottom: 20px;
-  }
-  @media (max-width: 900px) {
-    .hero-split { grid-template-columns: 1fr; gap: 40px; }
-    .hero-right { display: none; }
-    .hero-left h1 { font-size: 38px; }
-    .hero-left p { font-size: 16px; }
-  }
 
   /* BUTTONS */
   .btn-primary {
@@ -301,56 +289,47 @@
     justify-content: center;
   }
 
-  /* SENSOR SECTION */
+  /* BACKGROUNDS */
   .bg2 { background: var(--bg2); }
   .bg-deep { background: var(--bg-deep); }
-  .sensor-grid {
+
+  /* PROTECTION LIST */
+  .protection-list {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 16px;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 64px;
     margin-top: 48px;
   }
-  @media (max-width: 768px) { .sensor-grid { grid-template-columns: 1fr; } }
-  .sensor-card {
-    background: var(--bg3);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 28px;
-    transition: border-color 0.2s;
+  @media (max-width: 768px) { .protection-list { grid-template-columns: 1fr; } }
+  .protection-col {
+    list-style: none;
+    padding: 0;
+    margin: 0;
   }
-  .sensor-card:hover { border-color: rgba(255,255,255,0.16); }
-  .sensor-card-icon {
-    width: 36px; height: 36px;
-    background: rgba(255,255,255,0.05);
-    border: 1px solid var(--border);
-    border-radius: 8px;
+  .protection-col li {
+    font-size: 15px;
+    color: var(--muted);
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+    line-height: 1.5;
     display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-bottom: 16px;
+    align-items: flex-start;
+    gap: 12px;
   }
-  .sensor-card h3 { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 10px; }
-  .sensor-card p { font-size: 13px; color: var(--muted); line-height: 1.65; }
-  .sensor-perf {
-    margin-top: 14px;
-    font-family: monospace;
-    font-size: 11px;
+  .protection-col li::before {
+    content: '';
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.3);
+    flex-shrink: 0;
+    margin-top: 9px;
+  }
+  .protection-footnote {
+    font-size: 13px;
     color: var(--faint);
-  }
-  .sensor-watches {
-    margin-top: 14px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
-  }
-  .watch-tag {
-    font-size: 10px;
-    font-family: monospace;
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 2px 6px;
-    color: var(--faint);
+    margin-top: 36px;
+    text-align: center;
   }
 
   /* TERMINAL DEMO */
@@ -389,7 +368,6 @@
   .terminal-line .path { color: rgba(255,255,255,0.5); }
   .terminal-line.alert-line .ev { color: var(--amber); }
   .terminal-line.block-line .ev { color: #fff; font-weight: 700; }
-  .terminal-line.block-line .score { color: var(--red); }
   .terminal-cursor {
     display: inline-block;
     width: 7px; height: 14px;
@@ -407,14 +385,14 @@
     align-items: center;
   }
   @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; gap: 40px; } }
-  .storyline-card {
+  .hound-trace-card {
     background: var(--bg3);
     border: 1px solid var(--border);
     border-left: 3px solid #fff;
     border-radius: 14px;
     padding: 24px;
   }
-  .storyline-header {
+  .hound-trace-header {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -440,10 +418,10 @@
     font-weight: 700;
   }
   .badge-time { margin-left: auto; font-size: 12px; color: var(--muted); }
-  .storyline-card h4 { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 16px; }
-  .storyline-divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
-  .storyline-block { margin-bottom: 14px; }
-  .storyline-label {
+  .hound-trace-card h4 { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 16px; }
+  .hound-trace-divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+  .hound-trace-block { margin-bottom: 14px; }
+  .hound-trace-label {
     font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.08em;
@@ -451,7 +429,7 @@
     color: var(--faint);
     margin-bottom: 4px;
   }
-  .storyline-block p { font-size: 13px; color: var(--muted); line-height: 1.6; }
+  .hound-trace-block p { font-size: 13px; color: var(--muted); line-height: 1.6; }
   .mitre-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
   .mitre-tag {
     font-size: 10px;
@@ -703,201 +681,55 @@
 <!-- HERO -->
 <section class="hero">
   <div class="container">
-    <div class="hero-split">
-      <div class="hero-left">
-        <div class="badge-pill">
-          <span class="dot"></span>
-          Free &middot; Local-first &middot; Privacy-first
-        </div>
-        <h1>Your Mac is more exposed than you think.</h1>
-        <p>Hound watches how programs behave on your Mac and stops attacks before they cause damage. No signatures. No cloud dependency. No subscription.</p>
-        <div class="hero-buttons">
-          <a href="./download.html" class="btn-primary">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M12 3v13M6 11l6 6 6-6" stroke="#0f1117" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M4 20h16" stroke="#0f1117" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-            Download for macOS
-          </a>
-          <a href="./how-it-works.html" class="btn-ghost">How it works</a>
-        </div>
-        <p class="hero-fine">macOS 12 Monterey or later &middot; Apple Silicon + Intel</p>
+    <div class="hero-centered">
+      <div class="badge-pill">
+        <span class="dot"></span>
+        Free &middot; Local-first &middot; Silent by default
       </div>
-      <div class="hero-right">
-        <div class="pipeline-svg-wrap">
-          <div class="pipeline-label">Detection pipeline</div>
-          <svg viewBox="0 0 480 190" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="width:100%;display:block;">
-            <defs>
-              <path id="s1" d="M 132,23 L 154,86"/>
-              <path id="s2" d="M 132,63 L 154,86"/>
-              <path id="s3" d="M 132,103 L 154,86"/>
-              <path id="s4" d="M 132,143 L 154,86"/>
-              <path id="m1" d="M 278,86 L 298,86"/>
-              <path id="m2" d="M 394,86 L 410,86"/>
-            </defs>
-
-            <!-- Sensor connection lines -->
-            <line x1="132" y1="23" x2="154" y2="86" stroke="rgba(255,255,255,0.07)" stroke-width="1"/>
-            <line x1="132" y1="63" x2="154" y2="86" stroke="rgba(255,255,255,0.07)" stroke-width="1"/>
-            <line x1="132" y1="103" x2="154" y2="86" stroke="rgba(255,255,255,0.07)" stroke-width="1"/>
-            <line x1="132" y1="143" x2="154" y2="86" stroke="rgba(255,255,255,0.07)" stroke-width="1"/>
-
-            <!-- Mid lines -->
-            <line x1="278" y1="86" x2="298" y2="86" stroke="rgba(255,255,255,0.09)" stroke-width="1"/>
-            <line x1="394" y1="86" x2="414" y2="86" stroke="rgba(255,255,255,0.09)" stroke-width="1"/>
-
-            <!-- Sensor boxes -->
-            <rect x="0" y="10" width="132" height="26" rx="5" fill="#13151f" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
-            <text x="10" y="27" font-size="10" font-family="monospace" fill="#6b7280">File System</text>
-
-            <rect x="0" y="50" width="132" height="26" rx="5" fill="#13151f" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
-            <text x="10" y="67" font-size="10" font-family="monospace" fill="#6b7280">Process Monitor</text>
-
-            <rect x="0" y="90" width="132" height="26" rx="5" fill="#13151f" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
-            <text x="10" y="107" font-size="10" font-family="monospace" fill="#6b7280">Network</text>
-
-            <rect x="0" y="130" width="132" height="26" rx="5" fill="#13151f" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
-            <text x="10" y="147" font-size="10" font-family="monospace" fill="#6b7280">Persistence</text>
-
-            <!-- Detection Engine -->
-            <rect x="154" y="46" width="124" height="80" rx="8" fill="#1a1d27" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
-            <text x="216" y="80" font-size="11" font-family="-apple-system,sans-serif" font-weight="700" fill="#ffffff" text-anchor="middle">Detection</text>
-            <text x="216" y="96" font-size="11" font-family="-apple-system,sans-serif" font-weight="700" fill="#ffffff" text-anchor="middle">Engine</text>
-            <text x="216" y="114" font-size="9" font-family="monospace" fill="#4b5563" text-anchor="middle">165 tests</text>
-
-            <!-- Incident Correlator -->
-            <rect x="298" y="66" width="96" height="40" rx="6" fill="#13151f" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
-            <text x="346" y="82" font-size="9" font-family="monospace" fill="#6b7280" text-anchor="middle">Incident</text>
-            <text x="346" y="95" font-size="9" font-family="monospace" fill="#6b7280" text-anchor="middle">Correlator</text>
-
-            <!-- Response Engine -->
-            <rect x="414" y="73" width="66" height="26" rx="5" fill="#13151f" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
-            <text x="447" y="90" font-size="9" font-family="monospace" fill="#6b7280" text-anchor="middle">Response</text>
-
-            <!-- Animated dots: sensors -->
-            <circle r="2.5" fill="rgba(255,255,255,0.9)">
-              <animateMotion dur="1.8s" repeatCount="indefinite" begin="0s"><mpath href="#s1"/></animateMotion>
-              <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.15;0.85;1" dur="1.8s" repeatCount="indefinite" begin="0s"/>
-            </circle>
-            <circle r="2.5" fill="rgba(255,255,255,0.9)">
-              <animateMotion dur="1.8s" repeatCount="indefinite" begin="0.45s"><mpath href="#s2"/></animateMotion>
-              <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.15;0.85;1" dur="1.8s" repeatCount="indefinite" begin="0.45s"/>
-            </circle>
-            <circle r="2.5" fill="rgba(255,255,255,0.9)">
-              <animateMotion dur="1.8s" repeatCount="indefinite" begin="0.9s"><mpath href="#s3"/></animateMotion>
-              <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.15;0.85;1" dur="1.8s" repeatCount="indefinite" begin="0.9s"/>
-            </circle>
-            <circle r="2.5" fill="rgba(255,255,255,0.9)">
-              <animateMotion dur="1.8s" repeatCount="indefinite" begin="1.35s"><mpath href="#s4"/></animateMotion>
-              <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.15;0.85;1" dur="1.8s" repeatCount="indefinite" begin="1.35s"/>
-            </circle>
-
-            <!-- Animated dots: pipeline stages -->
-            <circle r="2.5" fill="rgba(255,255,255,0.65)">
-              <animateMotion dur="0.7s" repeatCount="indefinite" begin="0s"><mpath href="#m1"/></animateMotion>
-              <animate attributeName="opacity" values="0;0.8;0" dur="0.7s" repeatCount="indefinite" begin="0s"/>
-            </circle>
-            <circle r="2.5" fill="rgba(255,255,255,0.65)">
-              <animateMotion dur="0.7s" repeatCount="indefinite" begin="0.35s"><mpath href="#m2"/></animateMotion>
-              <animate attributeName="opacity" values="0;0.8;0" dur="0.7s" repeatCount="indefinite" begin="0.35s"/>
-            </circle>
+      <h1>See exactly what your tools do.</h1>
+      <p>Hound gives developers complete execution visibility. Silence for clean builds. Instant alerts when a dependency touches credentials, phones home unexpectedly, or installs a persistence hook. No noise. No cloud. No subscription.</p>
+      <div class="hero-buttons">
+        <a href="./download.html" class="btn-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 3v13M6 11l6 6 6-6" stroke="#0f1117" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M4 20h16" stroke="#0f1117" stroke-width="2" stroke-linecap="round"/>
           </svg>
-          <div style="margin-top:16px; display:flex; gap:16px; flex-wrap:wrap;">
-            <div style="font-size:11px;color:#4b5563;">
-              <span style="font-family:monospace;color:#8b949e;">16 MB</span> memory
-            </div>
-            <div style="font-size:11px;color:#4b5563;">
-              <span style="font-family:monospace;color:#8b949e;">&lt;1%</span> CPU
-            </div>
-            <div style="font-size:11px;color:#4b5563;">
-              <span style="font-family:monospace;color:#8b949e;">~95%</span> MITRE coverage
-            </div>
-          </div>
-        </div>
+          Download for macOS
+        </a>
+        <a href="./how-it-works.html" class="btn-ghost">How it works</a>
       </div>
+      <p class="hero-fine">macOS 12 Monterey or later &middot; Apple Silicon + Intel</p>
     </div>
   </div>
 </section>
 
-<!-- WHAT HOUND WATCHES -->
+<!-- WHAT HOUND PROTECTS AGAINST -->
 <section class="bg2">
   <div class="container">
-    <p class="eyebrow reveal">Sensor layer</p>
-    <h2 class="section-title reveal">What Hound actually watches.</h2>
-    <p class="section-sub reveal">Four independent sensor subsystems. Each generates atomic signals. The detection engine evaluates those signals against 165 behavioral tests.</p>
-    <div class="sensor-grid">
-      <div class="sensor-card reveal">
-        <div class="sensor-card-icon">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-7-7z" stroke="#8b949e" stroke-width="1.5" stroke-linecap="round"/>
-            <path d="M13 2v7h7" stroke="#8b949e" stroke-width="1.5" stroke-linecap="round"/>
-          </svg>
-        </div>
-        <h3>File System</h3>
-        <p>Watches 11 directories using macOS FSEvents API (push-based, not polling). Detects file creation, permission changes, quarantine attribute changes, and magic bytes mismatches &mdash; executables disguised as PDFs or images.</p>
-        <div class="sensor-watches">
-          <span class="watch-tag">~/Downloads</span>
-          <span class="watch-tag">~/Desktop</span>
-          <span class="watch-tag">LaunchAgents</span>
-          <span class="watch-tag">~/.ssh</span>
-          <span class="watch-tag">~/.aws</span>
-          <span class="watch-tag">BTM database</span>
-        </div>
-        <div class="sensor-perf">~18 microseconds mean per tick</div>
-      </div>
-      <div class="sensor-card reveal">
-        <div class="sensor-card-icon">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <rect x="2" y="3" width="20" height="14" rx="2" stroke="#8b949e" stroke-width="1.5"/>
-            <path d="M8 21h8M12 17v4" stroke="#8b949e" stroke-width="1.5" stroke-linecap="round"/>
-          </svg>
-        </div>
-        <h3>Process Monitor</h3>
-        <p>Uses sysinfo kernel API &mdash; no subprocess spawning. Captures PID, parent PID, command, arguments, and executable path. Classifies processes as system, browser, interpreter, user app, or unknown. Flags dangerous parent-child relationships.</p>
-        <div class="sensor-watches">
-          <span class="watch-tag">interpreter abuse</span>
-          <span class="watch-tag">LOLBin execution</span>
-          <span class="watch-tag">masquerading</span>
-          <span class="watch-tag">double extension</span>
-        </div>
-        <div class="sensor-perf">~35 milliseconds mean per tick</div>
-      </div>
-      <div class="sensor-card reveal">
-        <div class="sensor-card-icon">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2z" stroke="#8b949e" stroke-width="1.5"/>
-            <path d="M2 12h20M12 2c-3 4-3 14 0 20M12 2c3 4 3 14 0 20" stroke="#8b949e" stroke-width="1.5" stroke-linecap="round"/>
-          </svg>
-        </div>
-        <h3>Network Monitor</h3>
-        <p>Polls active connections via lsof. Tracks per-PID connection history across ticks to detect C2 beaconing patterns: repeated connections to the same external IP at regular intervals. Apple and Google IP ranges suppressed.</p>
-        <div class="sensor-watches">
-          <span class="watch-tag">C2 beaconing</span>
-          <span class="watch-tag">external connections</span>
-          <span class="watch-tag">upload patterns</span>
-          <span class="watch-tag">exfiltration</span>
-        </div>
-        <div class="sensor-perf">~17 milliseconds mean per tick</div>
-      </div>
-      <div class="sensor-card reveal">
-        <div class="sensor-card-icon">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M12 3L2 8l10 5 10-5-10-5z" stroke="#8b949e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M2 16l10 5 10-5M2 12l10 5 10-5" stroke="#8b949e" stroke-width="1.5" stroke-linecap="round"/>
-          </svg>
-        </div>
-        <h3>Persistence Monitor</h3>
-        <p>Watches LaunchAgents and LaunchDaemons via FSEvents. Polls crontab for modifications. Monitors the BTM (Background Task Management) database. Detects login hook installation via com.apple.loginwindow defaults.</p>
-        <div class="sensor-watches">
-          <span class="watch-tag">LaunchAgents</span>
-          <span class="watch-tag">LaunchDaemons</span>
-          <span class="watch-tag">crontab</span>
-          <span class="watch-tag">login hooks</span>
-          <span class="watch-tag">BTM database</span>
-        </div>
-        <div class="sensor-perf">~8 milliseconds mean per tick</div>
-      </div>
+    <p class="eyebrow reveal">Scope violations</p>
+    <h2 class="section-title reveal">What Hound watches for.</h2>
+    <p class="section-sub reveal">Silence for clean builds. Alerts only when something steps outside expected scope — credential access, unexpected network, persistence install, or privilege escalation.</p>
+    <div class="protection-list">
+      <ul class="protection-col reveal">
+        <li>npm postinstall scripts that make outbound network calls</li>
+        <li>Dependencies accessing ~/.ssh, ~/.aws, or ~/.kube</li>
+        <li>Build tools installing LaunchAgent persistence</li>
+        <li>Scripts that download and execute in a single command</li>
+        <li>Processes touching browser credentials or the Keychain</li>
+        <li>Files exfiltrated to S3, GCS, or unknown endpoints</li>
+        <li>Package names that typosquat popular libraries</li>
+      </ul>
+      <ul class="protection-col reveal">
+        <li>curl | bash patterns from CI or test runners</li>
+        <li>Interpreters making raw inline network calls</li>
+        <li>Login hooks and crontab modifications</li>
+        <li>Security software being disabled or tampered with</li>
+        <li>SSH key access and lateral movement attempts</li>
+        <li>Commands piped directly into a shell interpreter</li>
+        <li>Boot security configuration being modified</li>
+      </ul>
     </div>
+    <p class="protection-footnote reveal">Hound watches execution behavior, not known signatures. It catches supply chain attacks that no antivirus has seen before.</p>
   </div>
 </section>
 
@@ -923,27 +755,27 @@
   </div>
 </section>
 
-<!-- STORYLINE -->
+<!-- HOUND TRACE -->
 <section>
   <div class="container">
     <div class="two-col">
       <div class="reveal">
-        <p class="eyebrow">StoryLine</p>
-        <h2 class="section-title">Plain English. Every incident, explained.</h2>
-        <p style="font-size:17px;color:var(--muted);line-height:1.7;margin-bottom:20px;">Every alert Hound generates comes with a full narrative: what happened, what was targeted, how it was caught, and what was done about it. No logs to parse. No cryptic alert codes.</p>
-        <p style="font-size:17px;color:var(--muted);line-height:1.7;">Every StoryLine maps to the MITRE ATT&amp;CK framework so you always know exactly which attack technique was used. All narratives are stored permanently on your device &mdash; never sent to a server.</p>
+        <p class="eyebrow">Hound Trace</p>
+        <h2 class="section-title">When something happens, you'll understand exactly what it was.</h2>
+        <p style="font-size:17px;color:var(--muted);line-height:1.7;margin-bottom:20px;">Every scope violation generates a Hound Trace: what happened, what was targeted, how it was caught, and what was done about it. No logs to parse. No cryptic alert codes.</p>
+        <p style="font-size:17px;color:var(--muted);line-height:1.7;">Every trace maps to the MITRE ATT&amp;CK framework so you always know exactly which technique was used. All traces are stored permanently on your device &mdash; never sent to a server.</p>
         <div style="margin-top:28px;">
           <a href="./how-it-works.html" class="btn-ghost">See how it works</a>
         </div>
       </div>
-      <div class="storyline-card reveal">
-        <div class="storyline-header">
+      <div class="hound-trace-card reveal">
+        <div class="hound-trace-header">
           <span class="badge-amber">High Risk</span>
           <span class="badge-red">Blocked</span>
           <span class="badge-time">14:23:03</span>
         </div>
         <h4>Malicious downloader disguised as invoice PDF</h4>
-        <hr class="storyline-divider">
+        <hr class="hound-trace-divider">
         <div class="incident-timeline">
           <div class="timeline-item">
             <div class="timeline-dot"></div>
@@ -967,14 +799,8 @@
           </div>
           <div class="timeline-item blocked">
             <div class="timeline-dot"></div>
-            <div class="timeline-text"><span class="ts">14:23:03</span>INCIDENT: download_and_execute [score=91] &mdash; Blocked</div>
+            <div class="timeline-text"><span class="ts">14:23:03</span>INCIDENT: download_and_execute &mdash; Blocked. Process killed, file quarantined.</div>
           </div>
-        </div>
-        <div class="mitre-tags">
-          <span class="mitre-tag">T1204</span>
-          <span class="mitre-tag">T1059</span>
-          <span class="mitre-tag">T1036</span>
-          <span class="mitre-tag">T1071</span>
         </div>
       </div>
     </div>
@@ -1101,16 +927,16 @@
           <span class="faq-indicator" aria-hidden="true">+</span>
         </button>
         <div class="faq-a">
-          <p>Incidents require a minimum of 35 correlation points to trigger. Single atomic signals rarely reach threshold on their own &mdash; it takes a combination of related suspicious behaviors. The whitelist is pre-configured for common developer tools (cargo, node, python, git) and common apps (Chrome, Xcode, VS Code). You can extend it in Settings.</p>
+          <p>Hound requires multiple related suspicious behaviors to fire an incident alert &mdash; a single unusual action is never enough on its own. It comes pre-configured to recognize common developer tools (cargo, node, python, git) and popular apps (Chrome, Xcode, VS Code). You can add your own trusted processes in Settings.</p>
         </div>
       </div>
       <div class="faq-item reveal">
         <button class="faq-q" aria-expanded="false">
-          What macOS versions are supported?
+          What does Hound actually do when it detects something?
           <span class="faq-indicator" aria-hidden="true">+</span>
         </button>
         <div class="faq-a">
-          <p>macOS 12 Monterey or later, on both Apple Silicon (M1, M2, M3, M4) and Intel. Hound is tested on macOS 15 Sequoia.</p>
+          <p>By default, Hound runs in Simulation Mode: it detects, alerts, and explains, but takes no action. When you're ready, switch to Live Mode in Settings. In Live Mode, Hound kills the malicious process and moves the file to an on-device quarantine. It will never act on system processes, browsers, or files outside its defined risk categories. Every action is logged in a response audit trail you can review at any time.</p>
         </div>
       </div>
       <div class="faq-item reveal">
@@ -1130,8 +956,8 @@
 <section style="text-align:center; border-top: 1px solid var(--border);">
   <div class="container">
     <p class="eyebrow reveal">Get protected</p>
-    <h2 class="section-title reveal">Your Mac deserves better than signature scanning.</h2>
-    <p class="reveal" style="font-size:18px;color:var(--muted);max-width:520px;margin:0 auto 40px;line-height:1.65;">Free, local-first behavioral endpoint protection. No account. No subscription. No compromise.</p>
+    <h2 class="section-title reveal">Know exactly what your tools do.</h2>
+    <p class="reveal" style="font-size:18px;color:var(--muted);max-width:520px;margin:0 auto 40px;line-height:1.65;">Free, local-first execution visibility for developers. No account. No subscription. No noise.</p>
     <div class="cta-row reveal">
       <a href="./download.html" class="btn-primary">Download for macOS &mdash; Free</a>
       <a href="./detection.html" class="btn-ghost">Full detection coverage</a>
@@ -1150,7 +976,7 @@
         </svg>
         Hound
       </div>
-      <p class="footer-brand-tag">Behavioral endpoint security for macOS</p>
+      <p class="footer-brand-tag">Execution visibility for developers</p>
     </div>
     <nav class="footer-nav" aria-label="Footer navigation">
       <a href="./how-it-works.html">How it works</a>
@@ -1186,7 +1012,7 @@ const obs = new IntersectionObserver(entries => {
   entries.forEach(e => {
     if (e.isIntersecting) { e.target.classList.add('visible'); obs.unobserve(e.target); }
   });
-}, { threshold: 0.07 });
+});
 document.querySelectorAll('.reveal').forEach(el => obs.observe(el));
 
 // Mobile nav
@@ -1224,9 +1050,9 @@ const lines = [
   { cls: 'alert-line', ts: '14:23:02', ev: 'file_became_executable', detail: 'chmod +x applied post-download' },
   { cls: 'alert-line', ts: '14:23:02', ev: 'process_spawned', detail: 'invoice_march.pdf.exe (pid 38291, parent: zsh)' },
   { cls: 'alert-line', ts: '14:23:03', ev: 'network_connection', detail: '192.168.1.5:49302 → 45.77.68.91:443' },
-  { cls: 'alert-line', ts: '14:23:03', ev: 'alert_c2_beaconing_pattern', detail: 'score=18, confidence=high' },
-  { cls: 'alert-line', ts: '14:23:03', ev: 'alert_downloaded_file_executed', detail: 'score=24, pid=38291' },
-  { cls: 'block-line', ts: '14:23:03', ev: 'INCIDENT: download_and_execute', detail: '[score=91] → BLOCKED — process killed, file quarantined' },
+  { cls: 'alert-line', ts: '14:23:03', ev: 'alert_c2_beaconing_pattern', detail: 'confidence=high, pid=38291' },
+  { cls: 'alert-line', ts: '14:23:03', ev: 'alert_downloaded_file_executed', detail: 'confidence=high, pid=38291' },
+  { cls: 'block-line', ts: '14:23:03', ev: 'INCIDENT: download_and_execute', detail: 'BLOCKED — process killed, file quarantined' },
 ];
 
 let lineIdx = 0;
@@ -1261,7 +1087,7 @@ const termObs = new IntersectionObserver(entries => {
     setTimeout(tick, 800);
     termObs.disconnect();
   }
-}, { threshold: 0.3 });
+});
 const termWrap = document.querySelector('.terminal-wrap');
 if (termWrap) termObs.observe(termWrap);
 </script>

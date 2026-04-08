@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { supabase } from "../lib/supabase";
+import { ShieldIcon } from "./icons";
 
 type Tab = "signup" | "signin";
 type Strength = "weak" | "fair" | "strong";
@@ -9,31 +10,10 @@ type Props = {
   onComplete: () => void;
 };
 
-function ShieldAuthIcon({ size = 64 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <path
-        d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.35C17.25 22.15 21 17.25 21 12V7L12 2z"
-        fill="rgba(16,185,129,0.15)"
-        stroke="#10b981"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M9 12l2 2 4-4"
-        stroke="#10b981"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 function EyeIcon({ show }: { show: boolean }) {
   if (show) {
     return (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
         <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
         <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
         <path d="M1 1l22 22" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
@@ -41,7 +21,7 @@ function EyeIcon({ show }: { show: boolean }) {
     );
   }
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
       <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
       <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.5"/>
     </svg>
@@ -50,9 +30,17 @@ function EyeIcon({ show }: { show: boolean }) {
 
 function Spinner() {
   return (
-    <svg className="auth-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none">
+    <svg className="auth-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none">
       <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2.5" strokeOpacity="0.25"/>
       <path d="M12 2a10 10 0 0110 10" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
+function CheckMark() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+      <polyline points="20 6 9 17 4 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
     </svg>
   );
 }
@@ -127,26 +115,14 @@ export function AuthScreen({ onComplete }: Props) {
   }
 
   async function handleSignUp() {
-    if (!email.trim() || !password.trim()) {
-      setError("Please fill in all fields.");
-      return;
-    }
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters.");
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError("Passwords do not match.");
-      return;
-    }
+    if (!email.trim() || !password.trim()) { setError("Please fill in all fields."); return; }
+    if (password.length < 8) { setError("Password must be at least 8 characters."); return; }
+    if (password !== confirmPassword) { setError("Passwords do not match."); return; }
     setLoading(true);
     setError("");
     try {
       const { data, error: err } = await supabase.auth.signUp({ email, password });
-      if (err) {
-        setError(err.message);
-        return;
-      }
+      if (err) { setError(err.message); return; }
       if (data.session?.access_token) {
         await invoke("save_auth_token", { token: data.session.access_token }).catch(() => {});
       }
@@ -159,18 +135,12 @@ export function AuthScreen({ onComplete }: Props) {
   }
 
   async function handleSignIn() {
-    if (!email.trim() || !password.trim()) {
-      setError("Please fill in all fields.");
-      return;
-    }
+    if (!email.trim() || !password.trim()) { setError("Please fill in all fields."); return; }
     setLoading(true);
     setError("");
     try {
       const { data, error: err } = await supabase.auth.signInWithPassword({ email, password });
-      if (err) {
-        setError(err.message);
-        return;
-      }
+      if (err) { setError(err.message); return; }
       if (data.session?.access_token) {
         await invoke("save_auth_token", { token: data.session.access_token }).catch(() => {});
       }
@@ -183,23 +153,16 @@ export function AuthScreen({ onComplete }: Props) {
   }
 
   async function handleForgotPassword() {
-    if (!email.trim()) {
-      setError("Enter your email address first.");
-      return;
-    }
+    if (!email.trim()) { setError("Enter your email address first."); return; }
     await supabase.auth.resetPasswordForEmail(email.trim()).catch(() => {});
     setError("Password reset email sent — check your inbox.");
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Enter") {
-      tab === "signup" ? handleSignUp() : handleSignIn();
-    }
+    if (e.key === "Enter") tab === "signup" ? handleSignUp() : handleSignIn();
   }
 
-  if (showFreeScreen) {
-    return <FreeScreen onComplete={onComplete} />;
-  }
+  if (showFreeScreen) return <FreeScreen onComplete={onComplete} />;
 
   const strength = password ? passwordStrength(password) : null;
 
@@ -208,24 +171,16 @@ export function AuthScreen({ onComplete }: Props) {
       <div className="auth-card">
         {/* Logo */}
         <div className="auth-logo-block">
-          <ShieldAuthIcon size={64} />
+          <div style={{ width: 48, height: 48, background: "var(--bg-elevated)", border: "1px solid var(--border-default)", borderRadius: "var(--radius-lg)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-primary)" }}>
+            <ShieldIcon size={22} />
+          </div>
           <div className="auth-wordmark">Hound</div>
         </div>
 
         {/* Tabs */}
         <div className="auth-tabs">
-          <button
-            className={`auth-tab ${tab === "signup" ? "auth-tab--active" : ""}`}
-            onClick={() => switchTab("signup")}
-          >
-            Sign Up
-          </button>
-          <button
-            className={`auth-tab ${tab === "signin" ? "auth-tab--active" : ""}`}
-            onClick={() => switchTab("signin")}
-          >
-            Sign In
-          </button>
+          <button className={`auth-tab ${tab === "signup" ? "auth-tab--active" : ""}`} onClick={() => switchTab("signup")}>Sign up</button>
+          <button className={`auth-tab ${tab === "signin" ? "auth-tab--active" : ""}`} onClick={() => switchTab("signin")}>Sign in</button>
         </div>
 
         {/* Form */}
@@ -260,7 +215,7 @@ export function AuthScreen({ onComplete }: Props) {
 
           {tab === "signup" && (
             <PasswordInput
-              label="Confirm Password"
+              label="Confirm password"
               value={confirmPassword}
               onChange={setConfirmPassword}
               onKeyDown={handleKeyDown}
@@ -273,36 +228,29 @@ export function AuthScreen({ onComplete }: Props) {
           {tab === "signup" ? (
             <>
               <button className="auth-submit-btn" onClick={handleSignUp} disabled={loading}>
-                {loading ? <><Spinner /> Creating account…</> : "Create Account"}
+                {loading ? <><Spinner /> Creating account...</> : "Create account"}
               </button>
-              <p className="auth-disclaimer">
-                By creating an account, you agree to our privacy policy.
-                Hound is free — no credit card required, ever.
-              </p>
+              <p className="auth-disclaimer">Free — no credit card required, ever.</p>
             </>
           ) : (
             <>
               <button className="auth-submit-btn" onClick={handleSignIn} disabled={loading}>
-                {loading ? <><Spinner /> Signing in…</> : "Sign In"}
+                {loading ? <><Spinner /> Signing in...</> : "Sign in"}
               </button>
               <div className="auth-forgot-row">
-                <button className="auth-forgot" onClick={handleForgotPassword}>
-                  Forgot password?
-                </button>
+                <button className="auth-forgot" onClick={handleForgotPassword}>Forgot password?</button>
               </div>
             </>
           )}
         </div>
 
-        <button className="auth-skip" onClick={onComplete}>
-          Continue without an account →
-        </button>
+        <button className="auth-skip" onClick={onComplete}>Continue without an account</button>
       </div>
     </div>
   );
 }
 
-// ── "Everything Is Free" screen shown after sign-up ───────────────────────
+// ── Free screen ───────────────────────────────────────────────────────────────
 
 const FREE_FEATURES = [
   "Full behavioral detection engine",
@@ -316,27 +264,25 @@ function FreeScreen({ onComplete }: { onComplete: () => void }) {
   return (
     <div className="auth-overlay">
       <div className="auth-free-card">
-        <ShieldAuthIcon size={64} />
+        <div style={{ width: 48, height: 48, background: "var(--bg-elevated)", border: "1px solid var(--border-default)", borderRadius: "var(--radius-lg)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-primary)" }}>
+          <ShieldIcon size={22} />
+        </div>
         <h2 className="auth-free-title">Protection that should exist for everyone.</h2>
-        <p className="auth-free-subtitle">
-          Behavioral endpoint security for your Mac. Free, forever.
-        </p>
+        <p className="auth-free-subtitle">Behavioral endpoint security for your Mac. Free, forever.</p>
 
         <div className="auth-free-plan">
           <div className="auth-free-features">
             {FREE_FEATURES.map((f) => (
               <div key={f} className="auth-free-feature">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                  <path d="M20 6L9 17l-5-5" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
+                <span style={{ color: "var(--text-tertiary)", display: "flex" }}>
+                  <CheckMark />
+                </span>
                 {f}
               </div>
             ))}
           </div>
           <div className="auth-free-price">Free — always</div>
-          <button className="auth-submit-btn" onClick={onComplete}>
-            Get Protected →
-          </button>
+          <button className="auth-submit-btn" onClick={onComplete}>Get protected</button>
         </div>
 
         <p className="auth-free-coming-soon">Coming soon: Family &amp; Team plans</p>

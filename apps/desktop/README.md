@@ -39,7 +39,7 @@ src/
 │   ├── Onboarding.tsx      5-screen first-run flow (permissions, privacy, health check)
 │   ├── AuthScreen.tsx      Sign-up / sign-in / skip
 │   ├── IncidentFeed.tsx    Inbox model with burst mode banner
-│   ├── StoryLine.tsx       Plain-English incident narrative + AI enhancement
+│   ├── HoundTrace.tsx      Plain-English incident narrative + AI enhancement
 │   ├── HistoryView.tsx     Complete incident history, searchable
 │   ├── HealthDashboard.tsx Stats, severity chart, MITRE chart, sim mode toggle
 │   ├── SettingsView.tsx    Whitelist editor, API key (Keychain), log path
@@ -62,10 +62,10 @@ src-tauri/src/lib.rs        All Tauri commands (file I/O, keychain, agent contro
 | `get_agent_status` | Check if core-agent is running via pgrep |
 | `get_simulation_mode` | Read simulation_mode from config |
 | `set_simulation_mode` | Write simulation_mode to config |
-| `generate_storyline` | Build deterministic plain-English incident narrative |
-| `acknowledge_with_storyline` | Acknowledge incident + generate + persist StoryLine |
-| `get_storylines` | Return all StoryLines (newest first) |
-| `explain_incident` | Call Claude Haiku API for AI-enhanced StoryLine |
+| `generate_hound_trace` | Build deterministic plain-English incident narrative |
+| `acknowledge_with_hound_trace` | Acknowledge incident + generate + persist Hound Trace |
+| `get_hound_traces` | Return all Hound Traces (newest first) |
+| `explain_incident` | Call Claude Haiku API for AI-enhanced Hound Trace |
 | `set_api_key` | Store Anthropic API key in macOS Keychain |
 | `get_whitelist` | Read whitelist from config |
 | `update_whitelist` | Write whitelist to config |

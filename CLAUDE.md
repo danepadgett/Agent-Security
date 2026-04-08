@@ -4,9 +4,34 @@
 
 ---
 
+## PRODUCT DIRECTION (April 2026 Pivot)
+
+**Primary audience: developers and builders.**
+
+Hound has pivoted from consumer/SMB endpoint security to execution visibility for developers. The core use case is: you're a developer running builds, installing packages, executing scripts — and you want to know if any of your tools are doing something outside expected scope.
+
+**Core philosophy: silence unless something actually matters.**
+- Clean builds, `npm install`, `cargo build`, `git pull` — zero output, zero noise.
+- Scope violations only: credential access (`.ssh`, `.aws`, Keychain), unexpected outbound network, persistence installation, privilege escalation, download-and-execute patterns.
+- Every alert is a Hound Trace: a permanent, plain-English record of what happened, what was targeted, how it was caught, and what was done.
+
+**Key new modules (April 2026):**
+- `execution_context.rs` — `ExecutionContext`, `ExecutionSource` (Terminal/IDE/CI/Script/Unknown), `ExecutionTracker`
+- `scope_violation.rs` — scope violation detection with clean negative cases (no false positives on `git pull`, `cargo build`, `npm install`)
+- `Dashboard.tsx` — rebuilt as Trace Feed: State A (all clear) and State B (recent scope violations)
+- Notification logic — `shouldNotify()` / `getNotificationText()`: suppress `behavioral_chain` noise below score 50, only notify on genuine scope violations
+
+**What did NOT change:**
+- All 225+ existing detection tests still pass (now 270+)
+- The full MITRE ATT&CK detection engine is still running
+- Incident correlation, response engine, quarantine, whitelist — all unchanged
+- The detection layer still catches everything it caught before; the UI and notification layer now filters for developer-relevant scope violations
+
+---
+
 ## YOUR ROLE
 
-You are acting as Lead Security Architect and Principal Rust Engineer on Hound — a local-first, AI-assisted endpoint cybersecurity platform for macOS. You have full access to this codebase and will help design, build, and improve it to production quality.
+You are acting as Lead Security Architect and Principal Rust Engineer on Hound — a local-first, AI-assisted execution visibility platform for macOS developers. You have full access to this codebase and will help design, build, and improve it to production quality.
 
 Think like a principal engineer at CrowdStrike or SentinelOne. Do not oversimplify. Do not suggest toy solutions. Every decision should be defensible in a real security product.
 
@@ -14,7 +39,7 @@ Think like a principal engineer at CrowdStrike or SentinelOne. Do not oversimpli
 
 ## PRODUCT VISION
 
-Hound is a free, consumer and SMB-grade Endpoint Detection and Response (EDR) agent for macOS. The goal is to give everyday users and small businesses genuine peace of mind — the kind of protection that today only exists in expensive enterprise tools.
+Hound is a free, developer-grade execution visibility tool for macOS. The goal is to give developers complete transparency into what their tools actually do — the kind of visibility that today requires expensive enterprise EDR or manual log analysis.
 
 **Core principles:**
 - Local-first. No cloud dependency for core detection. User data stays on device.
@@ -35,7 +60,7 @@ Hound/
 │   ├── src/
 │   │   ├── main.rs              # Entry point, main loop, CLI flags
 │   │   ├── config.rs            # Config loading, whitelist, simulation mode (live read)
-│   │   ├── detections.rs        # All atomic detection functions (165 tests)
+│   │   ├── detections.rs        # All atomic detection functions (201 tests)
 │   │   ├── incidents.rs         # Incident correlation engine
 │   │   ├── response.rs          # Response engine with guardrails + whitelist
 │   │   ├── files.rs             # File monitoring, magic bytes, tracked directories
@@ -47,6 +72,10 @@ Hound/
 │   │   ├── logging.rs           # JSONL telemetry with log rotation
 │   │   ├── perf.rs              # Per-subsystem performance instrumentation
 │   │   └── bin/watchdog.rs      # Standalone watchdog binary
+│   │   ├── entropy.rs           # Shannon entropy + obfuscation analysis (T1027)
+│   │   ├── binary_integrity.rs  # Binary hash baseline + supply chain detection (T1195.002)
+│   │   ├── dns_monitor.rs       # /etc/hosts tamper + DGA analysis (T1565.001)
+│   │   └── filesystem_anomaly.rs # Ransomware wave + ransom note + mass modification (T1486, T1485)
 │   └── Cargo.toml               # default-run = "core-agent"
 ├── apps/desktop/                # Tauri + React desktop UI
 │   ├── src/
@@ -56,7 +85,7 @@ Hound/
 │   │   │   ├── Sidebar.tsx      # Nav with incident count badge
 │   │   │   ├── IncidentFeed.tsx # Inbox model, burst mode banner, alert grouping
 │   │   │   ├── IncidentDetail.tsx # Attack timeline, MITRE techniques
-│   │   │   ├── StoryLine.tsx    # Plain-English incident narrative
+│   │   │   ├── HoundTrace.tsx    # Plain-English incident narrative
 │   │   │   ├── HealthDashboard.tsx # Stats, charts, simulation toggle
 │   │   │   └── SettingsView.tsx # API key (Keychain), whitelist editor, log path
 │   │   └── utils.ts             # JSON parsing, incident field extraction
@@ -65,7 +94,7 @@ Hound/
 │   ├── logs/
 │   │   ├── agent-events.jsonl   # Primary telemetry (50MB rotation, 5 files)
 │   │   ├── response-audit.jsonl # Every response action taken (20MB rotation)
-│   │   ├── storylines.jsonl     # Permanent StoryLine history, never deleted
+│   │   ├── hound_traces.jsonl     # Permanent Hound Trace history, never deleted
 │   │   ├── perf-stats.jsonl     # Performance metrics per subsystem
 │   │   └── watchdog.log         # Watchdog restart events
 │   ├── agent-config.toml        # All runtime configuration
@@ -84,7 +113,7 @@ Hound/
 ### Core Agent (Rust)
 
 **File Monitoring**
-Monitors: ~/Downloads, ~/Desktop, ~/Documents, ~/Library/LaunchAgents, ~/Library/LaunchDaemons, /etc/periodic/daily|weekly|monthly, ~/.ssh, ~/.aws, /var/db/com.apple.backgroundtaskmanagement
+Monitors: ~/Downloads, ~/Desktop, ~/Documents, ~/Library/LaunchAgents, ~/Library/LaunchDaemons, /etc/periodic/daily|weekly|monthly, ~/.ssh, ~/.aws, ~/.azure, ~/.config/gcloud, ~/.kube, ~/.docker, /var/db/com.apple.backgroundtaskmanagement
 Detects: file_created, file_modified, file_became_executable, file_gained_quarantine
 Magic bytes: reads first bytes to detect file type mismatch (executable disguised as .pdf, .jpg, etc.)
 
@@ -128,7 +157,7 @@ RSS memory tracked every 5 minutes
 CPU throttle: if subsystem exceeds 50ms, adds 50ms to next sleep
 --perf-report CLI flag prints formatted summary table
 
-### Detection Engine — 165 Tests, All Passing
+### Detection Engine — 225 Tests, All Passing
 
 **MITRE ATT&CK Coverage: ~95% (user-space ceiling)**
 
@@ -202,6 +231,61 @@ CPU throttle: if subsystem exceeds 50ms, adds 50ms to next sleep
 **Account & Persistence (T1078, T1136)**
 - alert_account_manipulation
 
+**Intelligence Upgrades (April 2026)**
+
+*Obfuscation & Encoding (T1027)*
+- alert_obfuscated_content_detected — Shannon entropy + base64/hex shellcode/eval pattern analysis in script files
+
+*Supply Chain (T1195.002)*
+- alert_binary_integrity_violation — SHA256 baseline monitoring of 23 security-sensitive binaries (curl, bash, brew, etc.)
+
+*DNS Security (T1565.001, T1071.004)*
+- alert_hosts_file_tampered — /etc/hosts SHA256 change detection
+
+*LLM-Enabled Malware (T1059)*
+- alert_llm_api_key_detected — Embedded LLM API keys in script files (OpenAI, Anthropic, Google, HuggingFace)
+- alert_runtime_code_generation — exec(requests.get(...)), eval(urllib...) patterns
+
+*Advanced Persistence (T1574.006, T1053.002, T1547)*
+- alert_dylib_hijacking_attempt — New .dylib in user Library paths or /usr/local/lib/
+- alert_at_job_created — New entries in /var/at/jobs/
+- alert_dock_persistence — com.apple.dock.plist modification
+- Extended hooks: ResumeHook, SleepHook added to existing login hook monitoring
+
+*Credential Access (T1552.001, T1555.001, T1115)*
+- alert_cloud_credential_access — Access to Azure, GCloud, Kubernetes, Docker, npm, PyPI credentials
+- alert_keychain_dump_attempt — Mass keychain dump via `security dump-keychain`
+- alert_clipboard_monitoring — Repeated pbpaste invocations (clipboard harvesting)
+
+**Tranche 2 — Process Injection (T1055)**
+- alert_dyld_injection_attempt — DYLD_INSERT_LIBRARIES in process args (T1055.001)
+- alert_process_hollowing_indicator — Known system binary running from /tmp or /var/folders (T1055.012)
+- alert_debugger_injection_attempt — lldb/gdb/dtrace from interpreter chain (T1055.008)
+- alert_process_injection_precursor — Unknown binary from /tmp executed by interpreter (T1055)
+
+**Tranche 2 — Expanded LOLBin Detection**
+- alert_expanded_lolbin — osascript shell, xargs shell, launchctl /tmp bootstrap, nohup from interpreter, awk system(), networksetup DNS modification, defaults write Accessibility, screencapture non-interactive, tccutil reset, installer /tmp pkg (10 patterns)
+
+**Tranche 2 — Defense Evasion Active (T1070, T1562)**
+- alert_defense_evasion_active — Log deletion, log erase command, timestamp stomping, security agent kill, SIP disable, shell history clearing
+
+**Tranche 2 — Filesystem Anomaly (T1486, T1485)**
+- alert_ransomware_rename_wave — 5+ files with ransomware extensions in 30s window
+- alert_ransom_note_created — Known ransom note filename created
+- alert_mass_file_rw_pattern — 30+ file modifications in 30s in same directory
+
+**Tranche 2 — Malicious Document & Dropper (T1204, T1059)**
+- alert_jxa_execution — osascript -l JavaScript with system calls (T1059.007)
+- alert_automator_workflow_execution — Automator from Downloads or interpreter chain
+- alert_script_applet_in_downloads — .app bundle wrapping a shell script in Downloads
+- alert_archive_dropper_execution — unzip/tar extracting to /tmp from interpreter
+- alert_fake_pdf_detected — .pdf file with executable magic bytes (T1036.007)
+
+**Tranche 2 — Network Behavior Fingerprinting (T1090, T1571, T1046)**
+- alert_tor_connection_detected — Connection to port 9050/9051 (Tor SOCKS)
+- alert_suspicious_port_usage — Connection to 4444/4445/1337/31337 (canonical RAT ports)
+- alert_connection_burst_detected — 10+ unique IPs in 60s from same process
+
 **Self-protection**
 - alert_config_tampered
 - alert_log_tampered
@@ -229,6 +313,26 @@ CPU throttle: if subsystem exceeds 50ms, adds 50ms to next sleep
 - alert_security_tool_tampering: 28pts
 - tight_time_window_bonus: 8pts
 - repeat_offender_pid_bonus: 8-12pts
+- alert_obfuscated_content_detected: 20pts (T1027)
+- alert_binary_integrity_violation: 40pts (T1195.002) — CRITICAL signal
+- alert_hosts_file_tampered: 22pts (T1565.001)
+- alert_llm_api_key_detected: 20pts (T1059)
+- alert_runtime_code_generation: 30pts (T1059)
+- alert_dylib_hijacking_attempt: 28pts (T1574.006)
+- alert_dock_persistence: 15pts (T1547)
+- alert_at_job_created: 18pts (T1053.002)
+- alert_keychain_dump_attempt: 25pts (T1555.001)
+- alert_cloud_credential_access: 20pts (T1552.001)
+- alert_clipboard_monitoring: 15pts (T1115)
+- alert_process_injection (grouped): 35pts (T1055)
+- alert_expanded_lolbin: 18pts
+- alert_defense_evasion_active: 22pts (T1070, T1562)
+- alert_malicious_document (grouped): 28pts (T1204, T1059, T1036.007)
+- alert_ransomware_rename_wave: rolls into has_ransomware (30pts existing)
+- alert_ransom_note_created: rolls into has_ransomware (30pts existing)
+- alert_tor_connection_detected: standalone alert (28pts recommended)
+- alert_suspicious_port_usage: standalone alert (18pts recommended)
+- alert_connection_burst_detected: standalone alert (24pts recommended)
 
 ### Response Engine
 Real mode available (simulation_mode read live from config on every decision)
@@ -260,7 +364,7 @@ response_blocked_by_whitelist events appear in UI with blue styling
 
 ### Log Rotation
 agent-events.jsonl: 50MB max, 5 rotated files kept
-response-audit.jsonl + storylines.jsonl: 20MB max, 10 rotated files
+response-audit.jsonl + hound_traces.jsonl: 20MB max, 10 rotated files
 Rotation event logged as event_type: log_rotated
 
 ### Desktop UI (Tauri + React)
@@ -284,7 +388,7 @@ One system notification per alert_behavioral_incident maximum
 3+ incidents in 30s → single summary notification
 notification_cooldown_ms = 30000 in config
 
-**StoryLine Feature**
+**Hound Trace Feature**
 Every incident gets a permanent plain-English narrative:
 - headline: one sentence summary
 - what_happened: 2-3 sentences explaining the attack chain
@@ -298,10 +402,10 @@ Two paths:
 - Path A (no API key): deterministic template-based generation from structured incident data — works offline, always available
 - Path B (API key configured): Claude Haiku enhances the narrative via Anthropic API, result cached, "✨ Enhanced with AI" badge shown
 
-StoryLines written to runtime/logs/storylines.jsonl permanently — the user's complete security history.
+Hound Traces written to runtime/logs/hound_traces.jsonl permanently — the user's complete security history.
 
 **History Tab**
-All StoryLines ever generated, searchable by keyword, filterable by verdict and risk level.
+All Hound Traces ever generated, searchable by keyword, filterable by verdict and risk level.
 
 **Settings**
 - Trusted Processes: add/remove whitelist entries, writes live to agent-config.toml
@@ -489,8 +593,8 @@ User-space ceiling is ~95% meaningful coverage. The remaining 5% requires Apple 
 ┌─────────▼──────────┐   ┌─────────▼──────────┐
 │    AI LAYER         │   │     UI LAYER         │
 │  Deterministic      │   │  Tauri + React       │
-│  StoryLine          │   │  Inbox Model         │
-│  + Optional Claude  │   │  StoryLine View      │
+│  HoundTrace         │   │  Inbox Model         │
+│  + Optional Claude  │   │  Hound Trace View      │
 │  Haiku enhancement  │   │  History Tab         │
 │  via Keychain key   │   │  Burst Mode Banner   │
 └────────────────────┘   └────────────────────┘

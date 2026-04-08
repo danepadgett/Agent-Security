@@ -211,6 +211,41 @@ export function ChevronDownIcon({ size = 14, ...p }: P) {
   );
 }
 
+export function BellIcon({ size = 20, ...p }: P) {
+  return (
+    <svg {...base(size, p)}>
+      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M13.73 21a2 2 0 0 1-3.46 0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function UserIcon({ size = 20, ...p }: P) {
+  return (
+    <svg {...base(size, p)}>
+      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="12" cy="7" r="4" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+export function ChevronRightIcon({ size = 14, ...p }: P) {
+  return (
+    <svg {...base(size, p)}>
+      <polyline points="9 18 15 12 9 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function HomeIcon({ size = 20, ...p }: P) {
+  return (
+    <svg {...base(size, p)}>
+      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <polyline points="9 22 9 12 15 12 15 22" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 /** Severity icon selector */
 export function SevIcon({ severity, size = 14 }: { severity: string; size?: number }) {
   const p = { size };

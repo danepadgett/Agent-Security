@@ -173,7 +173,10 @@ fn build_incident(acc: IncidentAccumulator, now: DateTime<Utc>, min_score: u8) -
     let has_keychain_access = acc.signal_set.contains("alert_keychain_access_attempt");
     let has_browser_cred_access = acc.signal_set.contains("alert_browser_credential_access");
     let has_ssh_key_access = acc.signal_set.contains("alert_ssh_key_access");
-    let has_ransomware = acc.signal_set.contains("alert_ransomware_behavior_detected");
+    let has_ransomware = acc.signal_set.contains("alert_ransomware_behavior_detected")
+        || acc.signal_set.contains("alert_ransomware_rename_wave")
+        || acc.signal_set.contains("alert_ransom_note_created")
+        || acc.signal_set.contains("alert_mass_file_rw_pattern");
     let has_file_type_mismatch = acc.signal_set.contains("alert_file_type_mismatch");
     let has_masquerading = acc.signal_set.contains("alert_process_masquerading");
     let has_double_extension = acc.signal_set.contains("alert_double_extension_execution");
@@ -196,6 +199,61 @@ fn build_incident(acc: IncidentAccumulator, now: DateTime<Utc>, min_score: u8) -
     let has_security_tool_tamper = acc.signal_set.contains("alert_security_tool_tampering");
     let has_account_manipulation = acc.signal_set.contains("alert_account_manipulation");
     let has_plist_modification = acc.signal_set.contains("alert_plist_modification");
+
+    // Intelligence upgrade signals
+    let has_obfuscated_content = acc.signal_set.contains("alert_obfuscated_content_detected");
+    let has_binary_integrity_violation = acc.signal_set.contains("alert_binary_integrity_violation");
+    let has_hosts_tampered = acc.signal_set.contains("alert_hosts_file_tampered");
+    let has_llm_api_key = acc.signal_set.contains("alert_llm_api_key_detected");
+    let has_runtime_code_gen = acc.signal_set.contains("alert_runtime_code_generation");
+    let has_dylib_hijacking = acc.signal_set.contains("alert_dylib_hijacking_attempt");
+    let has_dock_persistence = acc.signal_set.contains("alert_dock_persistence");
+    let has_at_job = acc.signal_set.contains("alert_at_job_created");
+    let has_keychain_dump = acc.signal_set.contains("alert_keychain_dump_attempt");
+    let has_cloud_cred_access = acc.signal_set.contains("alert_cloud_credential_access");
+    let has_clipboard_harvesting = acc.signal_set.contains("alert_clipboard_monitoring");
+
+    // Tranche 2 — grouped category booleans to keep score_incident param count manageable
+    let has_process_injection = acc.signal_set.contains("alert_dyld_injection_attempt")
+        || acc.signal_set.contains("alert_process_hollowing_indicator")
+        || acc.signal_set.contains("alert_debugger_injection_attempt")
+        || acc.signal_set.contains("alert_process_injection_precursor");
+    let has_expanded_lolbin = acc.signal_set.contains("alert_expanded_lolbin");
+    let has_defense_evasion_active = acc.signal_set.contains("alert_defense_evasion_active");
+    let has_malicious_document = acc.signal_set.contains("alert_fake_pdf_detected")
+        || acc.signal_set.contains("alert_jxa_execution")
+        || acc.signal_set.contains("alert_automator_workflow_execution")
+        || acc.signal_set.contains("alert_script_applet_in_downloads")
+        || acc.signal_set.contains("alert_archive_dropper_execution");
+
+    // Tranche 3 — grouped category booleans
+    let has_lateral_movement_ext = acc.signal_set.contains("alert_ssh_strict_host_bypass")
+        || acc.signal_set.contains("alert_ssh_batch_mode")
+        || acc.signal_set.contains("alert_ssh_proxy_command")
+        || acc.signal_set.contains("alert_ssh_reverse_tunnel")
+        || acc.signal_set.contains("alert_ssh_socks_proxy")
+        || acc.signal_set.contains("alert_sudo_enumeration")
+        || acc.signal_set.contains("alert_sudo_shell_escalation")
+        || acc.signal_set.contains("alert_sudo_env_preservation")
+        || acc.signal_set.contains("alert_su_from_interpreter")
+        || acc.signal_set.contains("alert_user_account_created")
+        || acc.signal_set.contains("alert_user_added_to_admin")
+        || acc.signal_set.contains("alert_sysadminctl_user_modification")
+        || acc.signal_set.contains("alert_authorized_keys_write")
+        || acc.signal_set.contains("alert_setuid_modification")
+        || acc.signal_set.contains("alert_pam_config_modification");
+    let has_exfiltration_ext = acc.signal_set.contains("alert_large_outbound_transfer")
+        || acc.signal_set.contains("alert_cloud_sync_sensitive_file")
+        || acc.signal_set.contains("alert_sensitive_directory_archived")
+        || acc.signal_set.contains("alert_curl_upload_detected")
+        || acc.signal_set.contains("alert_rclone_exfiltration")
+        || acc.signal_set.contains("alert_cloud_storage_upload");
+    let has_recon_correlation = acc.signal_set.contains("alert_automated_recon_detected")
+        || acc.signal_set.contains("alert_security_tool_discovery")
+        || acc.signal_set.contains("alert_sandbox_detection_attempt");
+    let has_cryptomining = acc.signal_set.contains("alert_mining_pool_connection")
+        || acc.signal_set.contains("alert_miner_process_detected")
+        || acc.signal_set.contains("alert_miner_args_detected");
 
     let signal_count = acc.signal_set.len();
 
@@ -244,6 +302,28 @@ fn build_incident(acc: IncidentAccumulator, now: DateTime<Utc>, min_score: u8) -
         has_security_tool_tamper,
         has_account_manipulation,
         has_plist_modification,
+        // Intelligence upgrade signals
+        has_obfuscated_content,
+        has_binary_integrity_violation,
+        has_hosts_tampered,
+        has_llm_api_key,
+        has_runtime_code_gen,
+        has_dylib_hijacking,
+        has_dock_persistence,
+        has_at_job,
+        has_keychain_dump,
+        has_cloud_cred_access,
+        has_clipboard_harvesting,
+        // Tranche 2 grouped signals
+        has_process_injection,
+        has_expanded_lolbin,
+        has_defense_evasion_active,
+        has_malicious_document,
+        // Tranche 3 grouped signals
+        has_lateral_movement_ext,
+        has_exfiltration_ext,
+        has_recon_correlation,
+        has_cryptomining,
         signal_count,
         acc.attack_chain_length,
         event_span_seconds,
@@ -334,6 +414,28 @@ fn score_incident(
     has_security_tool_tamper: bool,
     has_account_manipulation: bool,
     has_plist_modification: bool,
+    // Intelligence upgrade signals
+    has_obfuscated_content: bool,
+    has_binary_integrity_violation: bool,
+    has_hosts_tampered: bool,
+    has_llm_api_key: bool,
+    has_runtime_code_gen: bool,
+    has_dylib_hijacking: bool,
+    has_dock_persistence: bool,
+    has_at_job: bool,
+    has_keychain_dump: bool,
+    has_cloud_cred_access: bool,
+    has_clipboard_harvesting: bool,
+    // Tranche 2 grouped signals
+    has_process_injection: bool,
+    has_expanded_lolbin: bool,
+    has_defense_evasion_active: bool,
+    has_malicious_document: bool,
+    // Tranche 3 grouped signals
+    has_lateral_movement_ext: bool,
+    has_exfiltration_ext: bool,
+    has_recon_correlation: bool,
+    has_cryptomining: bool,
     signal_count: usize,
     attack_chain_length: usize,
     // Span in seconds between earliest and latest detection timestamps in this incident.
@@ -633,6 +735,164 @@ fn score_incident(
         });
     }
 
+    // ── Intelligence upgrade signals ──────────────────────────────────────────
+
+    if has_obfuscated_content {
+        components.push(IncidentScoreComponent {
+            name: "obfuscated_content_detected".to_string(),
+            points: 20,
+            reason: "Script file contains encoded or obfuscated payload (T1027)".to_string(),
+        });
+    }
+
+    if has_binary_integrity_violation {
+        components.push(IncidentScoreComponent {
+            name: "binary_integrity_violation".to_string(),
+            points: 40,
+            reason: "A trusted system binary was replaced — possible supply chain compromise (T1195.002)".to_string(),
+        });
+    }
+
+    if has_hosts_tampered {
+        components.push(IncidentScoreComponent {
+            name: "hosts_file_tampered".to_string(),
+            points: 22,
+            reason: "/etc/hosts was modified — possible DNS hijacking or C2 redirection (T1565.001)".to_string(),
+        });
+    }
+
+    if has_llm_api_key {
+        components.push(IncidentScoreComponent {
+            name: "llm_api_key_detected".to_string(),
+            points: 20,
+            reason: "File contains embedded LLM API key — hallmark of AI-generated malware (T1059)".to_string(),
+        });
+    }
+
+    if has_runtime_code_gen {
+        components.push(IncidentScoreComponent {
+            name: "runtime_code_generation".to_string(),
+            points: 30,
+            reason: "Process fetches and executes dynamically generated code — LLM-enabled malware pattern (T1059)".to_string(),
+        });
+    }
+
+    if has_dylib_hijacking {
+        components.push(IncidentScoreComponent {
+            name: "dylib_hijacking_attempt".to_string(),
+            points: 28,
+            reason: "New dylib placed in user-writable path that shadows system libraries (T1574.006)".to_string(),
+        });
+    }
+
+    if has_dock_persistence {
+        components.push(IncidentScoreComponent {
+            name: "dock_persistence".to_string(),
+            points: 15,
+            reason: "macOS Dock plist modified — possible persistent launch item added (T1547)".to_string(),
+        });
+    }
+
+    if has_at_job {
+        components.push(IncidentScoreComponent {
+            name: "at_job_created".to_string(),
+            points: 18,
+            reason: "New at-job created — scheduled persistence mechanism (T1053.002)".to_string(),
+        });
+    }
+
+    if has_keychain_dump {
+        components.push(IncidentScoreComponent {
+            name: "keychain_dump_attempt".to_string(),
+            points: 25,
+            reason: "Mass Keychain dump attempted — all stored passwords may be extracted (T1555.001)".to_string(),
+        });
+    }
+
+    if has_cloud_cred_access {
+        components.push(IncidentScoreComponent {
+            name: "cloud_credential_access".to_string(),
+            points: 20,
+            reason: "Unexpected process accessed cloud credentials (Azure/GCloud/Kubernetes/Docker) (T1552.001)".to_string(),
+        });
+    }
+
+    if has_clipboard_harvesting {
+        components.push(IncidentScoreComponent {
+            name: "clipboard_monitoring".to_string(),
+            points: 15,
+            reason: "Repeated clipboard reads detected — possible harvesting of passwords or crypto addresses (T1115)".to_string(),
+        });
+    }
+
+    // ── Tranche 2 signals ─────────────────────────────────────────────────────
+
+    if has_process_injection {
+        components.push(IncidentScoreComponent {
+            name: "process_injection".to_string(),
+            points: 35,
+            reason: "Process injection indicator detected — DYLD injection, hollowing, or debugger abuse (T1055)".to_string(),
+        });
+    }
+
+    if has_expanded_lolbin {
+        components.push(IncidentScoreComponent {
+            name: "expanded_lolbin".to_string(),
+            points: 18,
+            reason: "Expanded LOLBin abuse — osascript shell, tccutil reset, xargs shell, or networksetup DNS manipulation".to_string(),
+        });
+    }
+
+    if has_defense_evasion_active {
+        components.push(IncidentScoreComponent {
+            name: "defense_evasion_active".to_string(),
+            points: 22,
+            reason: "Active defense evasion — log deletion, timestamp stomping, history clearing, or security agent kill".to_string(),
+        });
+    }
+
+    if has_malicious_document {
+        components.push(IncidentScoreComponent {
+            name: "malicious_document".to_string(),
+            points: 28,
+            reason: "Malicious document or dropper detected — fake PDF, JXA, Automator workflow, or archive dropper (T1204.002)".to_string(),
+        });
+    }
+
+    // ── Tranche 3 signals ─────────────────────────────────────────────────────
+
+    if has_lateral_movement_ext {
+        components.push(IncidentScoreComponent {
+            name: "lateral_movement_ext".to_string(),
+            points: 28,
+            reason: "Lateral movement or privilege escalation detected — SSH tunneling, sudo abuse, account creation, authorized_keys backdoor, or PAM modification (T1021.004, T1548, T1098, T1556.003)".to_string(),
+        });
+    }
+
+    if has_exfiltration_ext {
+        components.push(IncidentScoreComponent {
+            name: "exfiltration_ext".to_string(),
+            points: 26,
+            reason: "Data exfiltration detected — cloud storage upload, rclone sync, curl upload, sensitive directory archive, or scp/rsync of credentials (T1041, T1560.001, T1567)".to_string(),
+        });
+    }
+
+    if has_recon_correlation {
+        components.push(IncidentScoreComponent {
+            name: "recon_correlation".to_string(),
+            points: 20,
+            reason: "Reconnaissance correlation — automated multi-category discovery, security tool enumeration, or sandbox detection (T1082, T1518.001, T1497.001)".to_string(),
+        });
+    }
+
+    if has_cryptomining {
+        components.push(IncidentScoreComponent {
+            name: "cryptomining".to_string(),
+            points: 38,
+            reason: "Cryptominer detected — known miner binary, mining pool connection, or Stratum protocol arguments (T1496)".to_string(),
+        });
+    }
+
     // ── Contextual bonuses ────────────────────────────────────────────────────
 
     if signal_count >= 3 {
@@ -810,13 +1070,36 @@ fn classify_attack_chain_label(timeline: &[IncidentTimelineStep]) -> String {
     let has_lolbin_or_injection = event_types.contains(&"alert_lolbin_execution")
         || event_types.contains(&"alert_curl_pipe_bash")
         || event_types.contains(&"alert_command_injection_pattern");
-    let has_ransomware = event_types.contains(&"alert_ransomware_behavior_detected");
+    let has_ransomware = event_types.contains(&"alert_ransomware_behavior_detected")
+        || event_types.contains(&"alert_ransomware_rename_wave")
+        || event_types.contains(&"alert_ransom_note_created")
+        || event_types.contains(&"alert_mass_file_rw_pattern");
     let has_ssh_lateral = event_types.contains(&"alert_ssh_lateral_movement")
-        || event_types.contains(&"alert_ssh_key_tampering");
+        || event_types.contains(&"alert_ssh_key_tampering")
+        || event_types.contains(&"alert_ssh_strict_host_bypass")
+        || event_types.contains(&"alert_ssh_batch_mode")
+        || event_types.contains(&"alert_ssh_proxy_command")
+        || event_types.contains(&"alert_ssh_reverse_tunnel")
+        || event_types.contains(&"alert_ssh_socks_proxy");
+    let has_priv_esc = event_types.contains(&"alert_sudo_enumeration")
+        || event_types.contains(&"alert_sudo_shell_escalation")
+        || event_types.contains(&"alert_sudo_env_preservation")
+        || event_types.contains(&"alert_su_from_interpreter")
+        || event_types.contains(&"alert_user_account_created")
+        || event_types.contains(&"alert_user_added_to_admin")
+        || event_types.contains(&"alert_sysadminctl_user_modification")
+        || event_types.contains(&"alert_authorized_keys_write")
+        || event_types.contains(&"alert_setuid_modification")
+        || event_types.contains(&"alert_pam_config_modification");
     let has_staging = event_types.contains(&"alert_data_staging_detected")
         || event_types.contains(&"alert_suspicious_archive_creation");
     let has_exfiltration = event_types.contains(&"alert_suspected_exfiltration")
-        || event_types.contains(&"alert_upload_command_detected");
+        || event_types.contains(&"alert_upload_command_detected")
+        || event_types.contains(&"alert_rclone_exfiltration")
+        || event_types.contains(&"alert_curl_upload_detected")
+        || event_types.contains(&"alert_cloud_storage_upload")
+        || event_types.contains(&"alert_cloud_sync_sensitive_file")
+        || event_types.contains(&"alert_large_outbound_transfer");
     let has_screen_capture = event_types.contains(&"alert_screen_capture_attempt")
         || event_types.contains(&"alert_suspicious_media_access");
     let has_browser_ext = event_types.contains(&"alert_browser_extension_installed");
@@ -826,6 +1109,18 @@ fn classify_attack_chain_label(timeline: &[IncidentTimelineStep]) -> String {
     let has_security_tool_tamper = event_types.contains(&"alert_security_tool_tampering");
     let has_account_manip = event_types.contains(&"alert_account_manipulation");
     let has_plist_mod = event_types.contains(&"alert_plist_modification");
+    let has_process_injection = event_types.contains(&"alert_dyld_injection_attempt")
+        || event_types.contains(&"alert_process_hollowing_indicator")
+        || event_types.contains(&"alert_debugger_injection_attempt")
+        || event_types.contains(&"alert_process_injection_precursor");
+    let has_defense_evasion = event_types.contains(&"alert_defense_evasion_active")
+        || event_types.contains(&"alert_security_tool_tampering")
+        || event_types.contains(&"alert_boot_security_tamper");
+    let has_malicious_doc = event_types.contains(&"alert_fake_pdf_detected")
+        || event_types.contains(&"alert_jxa_execution")
+        || event_types.contains(&"alert_automator_workflow_execution")
+        || event_types.contains(&"alert_script_applet_in_downloads")
+        || event_types.contains(&"alert_archive_dropper_execution");
 
     if has_ransomware {
         "ransomware_attack".to_string()
@@ -837,8 +1132,16 @@ fn classify_attack_chain_label(timeline: &[IncidentTimelineStep]) -> String {
         "data_exfiltration".to_string()
     } else if has_ssh_lateral && has_credential_access {
         "lateral_movement_with_credential_theft".to_string()
+    } else if has_ssh_lateral && has_priv_esc {
+        "lateral_movement_with_privilege_escalation".to_string()
     } else if has_ssh_lateral {
         "lateral_movement_chain".to_string()
+    } else if has_priv_esc && has_persistence {
+        "privilege_escalation_to_persistence".to_string()
+    } else if has_priv_esc && has_credential_access {
+        "privilege_escalation_with_credential_theft".to_string()
+    } else if has_priv_esc {
+        "privilege_escalation_chain".to_string()
     } else if has_staging {
         "data_staging_chain".to_string()
     } else if has_screen_capture && has_credential_access {
@@ -883,6 +1186,20 @@ fn classify_attack_chain_label(timeline: &[IncidentTimelineStep]) -> String {
         "download_to_plist_persistence".to_string()
     } else if has_plist_mod {
         "plist_persistence_chain".to_string()
+    } else if has_process_injection && has_defense_evasion {
+        "injection_with_defense_evasion".to_string()
+    } else if has_process_injection && has_persistence {
+        "injection_to_persistence".to_string()
+    } else if has_process_injection {
+        "process_injection_chain".to_string()
+    } else if has_malicious_doc && has_credential_access {
+        "document_to_credential_theft".to_string()
+    } else if has_malicious_doc && has_persistence {
+        "document_to_persistence".to_string()
+    } else if has_malicious_doc {
+        "malicious_document_chain".to_string()
+    } else if has_defense_evasion && has_persistence {
+        "defense_evasion_to_persistence".to_string()
     } else if has_signed_proxy && has_persistence {
         "signed_proxy_to_persistence".to_string()
     } else if has_signed_proxy {
@@ -1113,6 +1430,177 @@ fn to_timeline_step(event: &TelemetryEvent) -> IncidentTimelineStep {
                 format_path_suffix(path.as_deref())
             ),
         ),
+        "alert_ransomware_rename_wave" => (
+            "ransomware encryption wave".to_string(),
+            "Mass file encryption detected — files renamed with ransomware extensions in short window".to_string(),
+        ),
+        "alert_ransom_note_created" => (
+            "ransom note created".to_string(),
+            format!("Ransom note file created{}", format_path_suffix(path.as_deref())),
+        ),
+        "alert_mass_file_rw_pattern" => (
+            "mass file modification".to_string(),
+            "Unusually high number of file modifications — possible destructive malware or ransomware".to_string(),
+        ),
+        "alert_dyld_injection_attempt" => (
+            "dylib injection attempt".to_string(),
+            "Process launched with DYLD_INSERT_LIBRARIES — dylib injection into target process".to_string(),
+        ),
+        "alert_process_hollowing_indicator" => (
+            "process hollowing indicator".to_string(),
+            "Known system binary name running from /tmp or /var/folders — possible process hollowing".to_string(),
+        ),
+        "alert_debugger_injection_attempt" => (
+            "debugger injection attempt".to_string(),
+            "Debugger/introspection tool launched from interpreter chain — possible task_for_pid abuse".to_string(),
+        ),
+        "alert_process_injection_precursor" => (
+            "injection staging from /tmp".to_string(),
+            "Binary executed from /tmp or /var/folders by interpreter chain — injection staging indicator".to_string(),
+        ),
+        "alert_expanded_lolbin" => (
+            "expanded LOLBin abuse".to_string(),
+            "LOLBin abuse detected — osascript shell, xargs shell, tccutil reset, or DNS manipulation".to_string(),
+        ),
+        "alert_defense_evasion_active" => (
+            "active defense evasion".to_string(),
+            "Active defense evasion — log deletion, timestamp stomping, history clearing, or security agent kill".to_string(),
+        ),
+        "alert_fake_pdf_detected" => (
+            "fake PDF dropper detected".to_string(),
+            format!(
+                "File with .pdf extension has executable magic bytes — fake PDF dropper{}",
+                format_path_suffix(path.as_deref())
+            ),
+        ),
+        "alert_jxa_execution" => (
+            "JXA system call execution".to_string(),
+            "JXA (JavaScript for Automation) executing system calls — common malicious document payload".to_string(),
+        ),
+        "alert_automator_workflow_execution" => (
+            "Automator workflow execution".to_string(),
+            "Automator workflow executed from Downloads or interpreter chain — dropper mechanism".to_string(),
+        ),
+        "alert_script_applet_in_downloads" => (
+            "script applet in Downloads".to_string(),
+            "Script applet (.app bundle wrapping a shell script) executed from Downloads".to_string(),
+        ),
+        "alert_archive_dropper_execution" => (
+            "archive dropper executed".to_string(),
+            "Archive tool extracting to /tmp or Downloads from interpreter chain — dropper staging".to_string(),
+        ),
+        // Tranche 3 — Lateral Movement & Privilege Escalation
+        "alert_ssh_strict_host_bypass" => (
+            "SSH strict host bypass".to_string(),
+            "SSH connected with StrictHostKeyChecking disabled — automated lateral movement indicator".to_string(),
+        ),
+        "alert_ssh_batch_mode" => (
+            "SSH batch mode".to_string(),
+            "SSH running in batch mode — scripted lateral movement or pivoting".to_string(),
+        ),
+        "alert_ssh_proxy_command" => (
+            "SSH ProxyCommand pivoting".to_string(),
+            "SSH ProxyCommand used — possible host pivoting or multi-hop tunneling".to_string(),
+        ),
+        "alert_ssh_reverse_tunnel" => (
+            "SSH reverse tunnel".to_string(),
+            "SSH reverse tunnel (-R) created — attacker establishing persistent inbound backdoor".to_string(),
+        ),
+        "alert_ssh_socks_proxy" => (
+            "SSH SOCKS proxy".to_string(),
+            "SSH SOCKS proxy (-D) from interpreter chain — network traffic being tunneled through attacker host".to_string(),
+        ),
+        "alert_sudo_enumeration" => (
+            "sudo permission enumeration".to_string(),
+            "sudo -l executed — attacker enumerating which commands can be run as root".to_string(),
+        ),
+        "alert_sudo_shell_escalation" => (
+            "sudo shell escalation".to_string(),
+            "sudo spawning a shell — privilege escalation to root via interactive shell".to_string(),
+        ),
+        "alert_sudo_env_preservation" => (
+            "sudo environment preservation".to_string(),
+            "sudo -E from interpreter chain — possible bypass of environment restrictions".to_string(),
+        ),
+        "alert_su_from_interpreter" => (
+            "su from interpreter".to_string(),
+            "su invoked from interpreter chain — privilege escalation attempt".to_string(),
+        ),
+        "alert_user_account_created" => (
+            "user account created".to_string(),
+            "New local user account created via dscl — persistence or privilege escalation".to_string(),
+        ),
+        "alert_user_added_to_admin" => (
+            "user added to admin group".to_string(),
+            "User added to admin group via dscl — privilege escalation".to_string(),
+        ),
+        "alert_sysadminctl_user_modification" => (
+            "sysadminctl user modification".to_string(),
+            "sysadminctl modifying user accounts or granting admin privileges".to_string(),
+        ),
+        "alert_authorized_keys_write" => (
+            "SSH authorized_keys backdoor".to_string(),
+            "Writing to authorized_keys file — SSH backdoor installation for persistent access".to_string(),
+        ),
+        "alert_setuid_modification" => (
+            "setuid bit set".to_string(),
+            "setuid/setgid bit set on file from interpreter chain — privilege escalation vector".to_string(),
+        ),
+        "alert_pam_config_modification" => (
+            "PAM configuration modified".to_string(),
+            "PAM authentication config modified — authentication bypass possible".to_string(),
+        ),
+        // Tranche 3 — Data Exfiltration
+        "alert_rclone_exfiltration" => (
+            "rclone remote exfiltration".to_string(),
+            "rclone syncing data to remote cloud storage — high-confidence data exfiltration".to_string(),
+        ),
+        "alert_curl_upload_detected" => (
+            "curl file upload".to_string(),
+            "curl uploading file to remote server — potential data exfiltration".to_string(),
+        ),
+        "alert_cloud_storage_upload" => (
+            "cloud storage upload".to_string(),
+            "Cloud CLI (aws/gsutil/az) uploading data to remote bucket — cloud exfiltration".to_string(),
+        ),
+        "alert_cloud_sync_sensitive_file" => (
+            "cloud sync of sensitive file".to_string(),
+            "Cloud sync tool accessing sensitive credential or key path — possible exfiltration".to_string(),
+        ),
+        "alert_sensitive_directory_archived" => (
+            "sensitive directory archived".to_string(),
+            "Archive tool compressing sensitive directory — data staging for exfiltration".to_string(),
+        ),
+        "alert_large_outbound_transfer" => (
+            "large outbound data transfer".to_string(),
+            "Network tool transferring file data to remote host — possible data exfiltration".to_string(),
+        ),
+        // Tranche 3 — Reconnaissance Correlation
+        "alert_automated_recon_detected" => (
+            "automated multi-category recon".to_string(),
+            "Multiple reconnaissance categories (system/network/filesystem) fired from same parent — automated discovery".to_string(),
+        ),
+        "alert_security_tool_discovery" => (
+            "security tool discovery".to_string(),
+            "Process enumerating installed security tools or agents — attacker profiling defenses".to_string(),
+        ),
+        "alert_sandbox_detection_attempt" => (
+            "sandbox detection attempt".to_string(),
+            "Process probing for virtualization or sandbox indicators from interpreter chain".to_string(),
+        ),
+        // Tranche 3 — Cryptomining
+        "alert_miner_process_detected" => (
+            "cryptominer binary executing".to_string(),
+            "Known cryptominer binary detected — resource hijacking for cryptocurrency mining".to_string(),
+        ),
+        "alert_miner_args_detected" => (
+            "mining pool arguments detected".to_string(),
+            "Process arguments contain mining pool URL, Stratum protocol, or algorithm flags — cryptominer".to_string(),
+        ),
+        "alert_mining_pool_connection" => (
+            "mining pool connection".to_string(),
+            "Process connecting to mining pool port or Stratum endpoint — cryptomining activity".to_string(),
+        ),
         other => (
             other.to_string(),
             "Behavioral detection contributed to the incident".to_string(),
@@ -1187,6 +1675,34 @@ fn timeline_priority(event_type: &str) -> u8 {
         "alert_account_manipulation" => 91,
         "alert_security_tool_tampering" => 96,
         "alert_boot_security_tamper" => 98,
+        // Intelligence upgrades
+        "alert_obfuscated_content_detected" => 45,
+        "alert_dylib_hijacking_attempt" => 78,
+        "alert_dock_persistence" => 35,
+        "alert_at_job_created" => 55,
+        "alert_hosts_file_tampered" => 70,
+        "alert_llm_api_key_detected" => 60,
+        "alert_runtime_code_generation" => 95,
+        "alert_binary_integrity_violation" => 99,
+        "alert_keychain_dump_attempt" => 92,
+        "alert_cloud_credential_access" => 65,
+        "alert_clipboard_monitoring" => 30,
+        // Tranche 2 filesystem anomaly
+        "alert_ransomware_rename_wave" => 99,
+        "alert_ransom_note_created" => 99,
+        "alert_mass_file_rw_pattern" => 85,
+        // Tranche 2 signals
+        "alert_dyld_injection_attempt" => 97,
+        "alert_process_hollowing_indicator" => 97,
+        "alert_debugger_injection_attempt" => 75,
+        "alert_process_injection_precursor" => 72,
+        "alert_expanded_lolbin" => 60,
+        "alert_defense_evasion_active" => 80,
+        "alert_fake_pdf_detected" => 32,
+        "alert_jxa_execution" => 68,
+        "alert_automator_workflow_execution" => 65,
+        "alert_script_applet_in_downloads" => 66,
+        "alert_archive_dropper_execution" => 67,
         _ => 100,
     }
 }
@@ -1497,6 +2013,9 @@ mod tests {
             true,  false, false, false, false, false, false, false,  // has_command_injection
             false, false, false, false, false, // tranche 2 signals
             false, false, false, false, false, false, // tranche 3 signals
+            false, false, false, false, false, false, false, false, false, false, false, // intelligence upgrades
+            false, false, false, false, // tranche 2 grouped
+            false, false, false, false, // tranche 3 grouped
             2,  // signal_count
             1,  // attack_chain_length
             15, // event_span_seconds (within 30s window)
@@ -1519,6 +2038,9 @@ mod tests {
             false, true, true, false, false, false, false, false, false, false,
             false, false, false, false, false,
             false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, // intelligence upgrades
+            false, false, false, false, // tranche 2 grouped
+            false, false, false, false, // tranche 3 grouped
             2, 1,
             61, // event_span_seconds (outside 30s window)
             1,
@@ -1540,6 +2062,9 @@ mod tests {
             false, true, true, false, false, false, false, false, false, false,
             false, false, false, false, false,
             false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, // intelligence upgrades
+            false, false, false, false, // tranche 2 grouped
+            false, false, false, false, // tranche 3 grouped
             2, 1,
             u64::MAX, // no time window bonus
             3, // max_pid_signal_count = 3
@@ -1561,6 +2086,9 @@ mod tests {
             false, true, true, false, false, false, false, false, false, false,
             false, false, false, false, false,
             false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, // intelligence upgrades
+            false, false, false, false, // tranche 2 grouped
+            false, false, false, false, // tranche 3 grouped
             2, 1,
             u64::MAX,
             2, // only 2 signals from same pid — not enough
@@ -1586,6 +2114,9 @@ mod tests {
             false, false, false,
             false, false, false, false, false,
             false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, // intelligence upgrades
+            false, false, false, false, // tranche 2 grouped
+            false, false, false, false, // tranche 3 grouped
             1, 1, u64::MAX, 1,
             20,
         );
@@ -1603,6 +2134,9 @@ mod tests {
             false, true, true, false, false, false, false, false, false, false,
             false, false, false, false, false,
             false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, // intelligence upgrades
+            false, false, false, false, // tranche 2 grouped
+            false, false, false, false, // tranche 3 grouped
             2, 1, u64::MAX, 1,
             20,
         );
@@ -1633,6 +2167,9 @@ mod tests {
             browser_ext,
             exfiltration,
             false, false, false, false, false, false, // new tranche 3
+            false, false, false, false, false, false, false, false, false, false, false, // intelligence upgrades
+            false, false, false, false, // tranche 2 grouped
+            false, false, false, false, // tranche 3 grouped
             signal_count, 1, u64::MAX, 1,
             20,
         )
@@ -1660,6 +2197,9 @@ mod tests {
             false, false, true,  // has_ssh_lateral
             false, false,
             false, false, false, false, false, false, // new tranche 3
+            false, false, false, false, false, false, false, false, false, false, false, // intelligence upgrades
+            false, false, false, false, // tranche 2 grouped
+            false, false, false, false, // tranche 3 grouped
             3, 1, u64::MAX, 1,
             20,
         );

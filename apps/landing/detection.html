@@ -30,6 +30,7 @@
     font-size: 16px;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
+    padding-top: 56px;
   }
   a { color: inherit; text-decoration: none; }
 
@@ -88,7 +89,7 @@
 
   /* HERO */
   .docs-hero {
-    padding: 120px 24px 64px;
+    padding: 64px 24px 64px;
     max-width: 800px;
     margin: 0 auto;
     text-align: left;
@@ -500,16 +501,16 @@
 <!-- HERO -->
 <div class="docs-hero">
   <p class="eyebrow">MITRE ATT&amp;CK coverage</p>
-  <h1>45 detections.<br>11 tactics. ~95%.</h1>
-  <p>Every detection function has a positive test case and a negative test case. 165 tests, all passing.</p>
+  <h1>84 detections.<br>11 tactics. ~95%.</h1>
+  <p>Every detection function has a positive test case and a negative test case. 201 tests, all passing.</p>
   <div class="hero-stats">
     <div class="hero-stat">
-      <div class="hero-stat-num">45</div>
+      <div class="hero-stat-num">56</div>
       <div class="hero-stat-label">Detection functions</div>
     </div>
     <div class="hero-stat-divider"></div>
     <div class="hero-stat">
-      <div class="hero-stat-num">165</div>
+      <div class="hero-stat-num">201</div>
       <div class="hero-stat-label">Tests passing</div>
     </div>
     <div class="hero-stat-divider"></div>
@@ -695,6 +696,35 @@
             <tr data-tactic="Exfiltration"><td class="det-name">alert_upload_command_detected</td><td><span class="tactic-badge">Exfiltration</span></td><td class="det-technique">T1567</td><td class="det-score">16</td></tr>
             <tr data-tactic="Impact"><td class="det-name">alert_ransomware_behavior_detected</td><td><span class="tactic-badge">Impact</span></td><td class="det-technique">T1486</td><td class="det-score high">30</td></tr>
             <tr data-tactic="Impact"><td class="det-name">alert_burst_file_activity</td><td><span class="tactic-badge">Impact</span></td><td class="det-technique">T1485</td><td class="det-score">14</td></tr>
+            <!-- Intelligence Upgrades (April 2026) -->
+            <tr data-tactic="Defense Evasion"><td class="det-name">alert_obfuscated_content_detected</td><td><span class="tactic-badge">Defense Evasion</span></td><td class="det-technique">T1027</td><td class="det-score high">20</td></tr>
+            <tr data-tactic="Initial Access"><td class="det-name">alert_binary_integrity_violation</td><td><span class="tactic-badge">Initial Access</span></td><td class="det-technique">T1195.002</td><td class="det-score high">40</td></tr>
+            <tr data-tactic="Defense Evasion"><td class="det-name">alert_hosts_file_tampered</td><td><span class="tactic-badge">Defense Evasion</span></td><td class="det-technique">T1565.001</td><td class="det-score high">22</td></tr>
+            <tr data-tactic="Execution"><td class="det-name">alert_llm_api_key_detected</td><td><span class="tactic-badge">Execution</span></td><td class="det-technique">T1059</td><td class="det-score high">20</td></tr>
+            <tr data-tactic="Execution"><td class="det-name">alert_runtime_code_generation</td><td><span class="tactic-badge">Execution</span></td><td class="det-technique">T1059</td><td class="det-score high">30</td></tr>
+            <tr data-tactic="Persistence"><td class="det-name">alert_dylib_hijacking_attempt</td><td><span class="tactic-badge">Persistence</span></td><td class="det-technique">T1574.006</td><td class="det-score high">28</td></tr>
+            <tr data-tactic="Persistence"><td class="det-name">alert_dock_persistence</td><td><span class="tactic-badge">Persistence</span></td><td class="det-technique">T1547</td><td class="det-score">15</td></tr>
+            <tr data-tactic="Persistence"><td class="det-name">alert_at_job_created</td><td><span class="tactic-badge">Persistence</span></td><td class="det-technique">T1053.002</td><td class="det-score high">18</td></tr>
+            <tr data-tactic="Credential Access"><td class="det-name">alert_keychain_dump_attempt</td><td><span class="tactic-badge">Credential Access</span></td><td class="det-technique">T1555.001</td><td class="det-score high">25</td></tr>
+            <tr data-tactic="Credential Access"><td class="det-name">alert_cloud_credential_access</td><td><span class="tactic-badge">Credential Access</span></td><td class="det-technique">T1552.001</td><td class="det-score high">20</td></tr>
+            <tr data-tactic="Collection"><td class="det-name">alert_clipboard_monitoring</td><td><span class="tactic-badge">Collection</span></td><td class="det-technique">T1115</td><td class="det-score">15</td></tr>
+            <tr data-tactic="Defense Evasion"><td class="det-name">alert_dyld_injection_attempt</td><td><span class="tactic-badge">Defense Evasion</span></td><td class="det-technique">T1055.001</td><td class="det-score">35</td></tr>
+            <tr data-tactic="Defense Evasion"><td class="det-name">alert_process_hollowing_indicator</td><td><span class="tactic-badge">Defense Evasion</span></td><td class="det-technique">T1055.012</td><td class="det-score">35</td></tr>
+            <tr data-tactic="Defense Evasion"><td class="det-name">alert_debugger_injection_attempt</td><td><span class="tactic-badge">Defense Evasion</span></td><td class="det-technique">T1055.008</td><td class="det-score">22</td></tr>
+            <tr data-tactic="Defense Evasion"><td class="det-name">alert_process_injection_precursor</td><td><span class="tactic-badge">Defense Evasion</span></td><td class="det-technique">T1055</td><td class="det-score">20</td></tr>
+            <tr data-tactic="Execution"><td class="det-name">alert_expanded_lolbin</td><td><span class="tactic-badge">Execution</span></td><td class="det-technique">T1059</td><td class="det-score">18</td></tr>
+            <tr data-tactic="Defense Evasion"><td class="det-name">alert_defense_evasion_active</td><td><span class="tactic-badge">Defense Evasion</span></td><td class="det-technique">T1070</td><td class="det-score">22</td></tr>
+            <tr data-tactic="Impact"><td class="det-name">alert_ransomware_rename_wave</td><td><span class="tactic-badge">Impact</span></td><td class="det-technique">T1486</td><td class="det-score">45</td></tr>
+            <tr data-tactic="Impact"><td class="det-name">alert_ransom_note_created</td><td><span class="tactic-badge">Impact</span></td><td class="det-technique">T1486</td><td class="det-score">40</td></tr>
+            <tr data-tactic="Impact"><td class="det-name">alert_mass_file_rw_pattern</td><td><span class="tactic-badge">Impact</span></td><td class="det-technique">T1485</td><td class="det-score">22</td></tr>
+            <tr data-tactic="Execution"><td class="det-name">alert_jxa_execution</td><td><span class="tactic-badge">Execution</span></td><td class="det-technique">T1059.007</td><td class="det-score">24</td></tr>
+            <tr data-tactic="Execution"><td class="det-name">alert_automator_workflow_execution</td><td><span class="tactic-badge">Execution</span></td><td class="det-technique">T1059.002</td><td class="det-score">20</td></tr>
+            <tr data-tactic="Execution"><td class="det-name">alert_script_applet_in_downloads</td><td><span class="tactic-badge">Execution</span></td><td class="det-technique">T1059</td><td class="det-score">22</td></tr>
+            <tr data-tactic="Execution"><td class="det-name">alert_archive_dropper_execution</td><td><span class="tactic-badge">Execution</span></td><td class="det-technique">T1204.002</td><td class="det-score">26</td></tr>
+            <tr data-tactic="Defense Evasion"><td class="det-name">alert_fake_pdf_detected</td><td><span class="tactic-badge">Defense Evasion</span></td><td class="det-technique">T1036.007</td><td class="det-score">35</td></tr>
+            <tr data-tactic="Command and Control"><td class="det-name">alert_tor_connection_detected</td><td><span class="tactic-badge">C2</span></td><td class="det-technique">T1090.003</td><td class="det-score">28</td></tr>
+            <tr data-tactic="Command and Control"><td class="det-name">alert_suspicious_port_usage</td><td><span class="tactic-badge">C2</span></td><td class="det-technique">T1571</td><td class="det-score">18</td></tr>
+            <tr data-tactic="Discovery"><td class="det-name">alert_connection_burst_detected</td><td><span class="tactic-badge">Discovery</span></td><td class="det-technique">T1046</td><td class="det-score">24</td></tr>
           </tbody>
         </table>
         <div class="no-results" id="no-results" style="display:none;">No detections match your search.</div>

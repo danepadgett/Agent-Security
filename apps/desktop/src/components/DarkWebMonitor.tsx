@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { CheckIcon, XIcon } from "./icons";
+import { XIcon } from "./icons";
 
 type BreachResult = {
   name: string;
@@ -46,11 +46,8 @@ export function DarkWebMonitor({ onBreachCountChange }: Props) {
     } catch { /* non-fatal */ }
   }, []);
 
-  useEffect(() => {
-    loadAll();
-  }, [loadAll]);
+  useEffect(() => { loadAll(); }, [loadAll]);
 
-  // Update parent with total breach count whenever breach data changes
   useEffect(() => {
     if (!onBreachCountChange) return;
     const total = Object.values(breaches).reduce((sum, arr) => sum + arr.length, 0);
@@ -90,10 +87,7 @@ export function DarkWebMonitor({ onBreachCountChange }: Props) {
       setEmails((prev) => [...prev, email]);
       setEmailInput("");
       setAddState("idle");
-      // Immediately check it if HIBP is configured
-      if (hibpConfigured) {
-        handleCheckEmail(email);
-      }
+      if (hibpConfigured) handleCheckEmail(email);
     } catch (err) {
       setAddState("error");
       setAddError(String(err));
@@ -123,7 +117,7 @@ export function DarkWebMonitor({ onBreachCountChange }: Props) {
     }
   }
 
-  function formatRelativeTime(iso: string): string {
+  function rel(iso: string): string {
     if (!iso) return "Never";
     const diff = Date.now() - new Date(iso).getTime();
     const mins = Math.floor(diff / 60_000);
@@ -134,222 +128,173 @@ export function DarkWebMonitor({ onBreachCountChange }: Props) {
     return `${Math.floor(hrs / 24)}d ago`;
   }
 
-  function formatBreachDate(date: string): string {
+  function breachDate(date: string): string {
     if (!date) return "";
-    const d = new Date(date);
-    return d.toLocaleDateString("en-US", { year: "numeric", month: "long" });
+    return new Date(date).toLocaleDateString("en-US", { year: "numeric", month: "long" });
   }
 
   const allBreaches = Object.values(breaches).flat();
 
   return (
-    <div className="dw-root">
-      {/* Header */}
-      <div className="dw-header">
-        <div className="dw-header-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.5" />
-          </svg>
-        </div>
-        <div>
-          <div className="dw-header-title">Dark Web Monitor</div>
-          <div className="dw-header-sub">
-            Check if your email addresses appear in known data breaches
-          </div>
+    <div className="dark-web-view">
+      <div className="dark-web-header">
+        <div className="dark-web-title">Dark Web Monitor</div>
+        <div className="dark-web-sub">
+          Check if your email addresses appear in known data breaches
         </div>
       </div>
 
-      <div className="dw-body">
-        {/* API Key section */}
-        {!hibpConfigured ? (
-          <div className="dw-section">
-            <div className="dw-section-title">Enable monitoring</div>
-            <div className="dw-api-notice">
-              <div className="dw-api-notice-body">
-                <p>
-                  Hound uses the <strong>HaveIBeenPwned API</strong> to check your email addresses
-                  against thousands of known data breaches. A personal API key is required —
-                  it costs <strong>$3.95/month</strong>, paid directly to HaveIBeenPwned (not to Hound).
-                </p>
-                <p style={{ marginTop: 8 }}>
-                  Get your key at{" "}
-                  <span className="dw-link">haveibeenpwned.com/API/Key</span>
-                </p>
-              </div>
-            </div>
-            <div className="dw-input-row">
-              <input
-                className="dw-input"
-                type="password"
-                placeholder="Paste your HIBP API key…"
-                value={apiKeyInput}
-                onChange={(e) => setApiKeyInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSaveApiKey()}
-              />
-              <button
-                className="dw-btn-primary"
-                onClick={handleSaveApiKey}
-                disabled={keyState === "saving" || !apiKeyInput.trim()}
-              >
-                {keyState === "saving" ? "Saving…" : "Save Key"}
-              </button>
-            </div>
-            {keyState === "error" && <div className="dw-error">{keyError}</div>}
-          </div>
-        ) : (
-          <div className="dw-section">
-            <div className="dw-key-configured">
-              <CheckIcon size={14} />
-              <span>HIBP API key configured</span>
-            </div>
-          </div>
-        )}
+      {/* Add email */}
+      <div className="dark-web-email-form">
+        <input
+          className="dark-web-email-input"
+          type="email"
+          placeholder="Add email address..."
+          value={emailInput}
+          onChange={(e) => setEmailInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleAddEmail()}
+        />
+        <button
+          className="dark-web-check-btn"
+          onClick={handleAddEmail}
+          disabled={addState === "checking" || !emailInput.trim()}
+        >
+          {addState === "checking" ? "Adding..." : "Add"}
+        </button>
+      </div>
 
-        {/* Add email */}
-        <div className="dw-section">
-          <div className="dw-section-title">Monitored addresses</div>
-          <div className="dw-input-row">
+      {addError && (
+        <div style={{ padding: "4px 20px", fontSize: 11, color: "var(--red)" }}>{addError}</div>
+      )}
+
+      {/* Email chips */}
+      {emails.length > 0 && (
+        <div className="dark-web-emails">
+          {emails.map((email) => (
+            <span key={email} className="dark-web-email-chip">
+              {email}
+              <button onClick={() => handleRemoveEmail(email)} aria-label={`Remove ${email}`}>
+                <XIcon size={10} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* HIBP API key setup */}
+      {!hibpConfigured && (
+        <div style={{ padding: "12px 20px", borderBottom: "1px solid var(--border-subtle)" }}>
+          <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginBottom: 8 }}>
+            A HaveIBeenPwned API key is required to check breaches ($3.95/month, paid to HIBP directly).
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
             <input
-              className="dw-input"
-              type="email"
-              placeholder="Add email address…"
-              value={emailInput}
-              onChange={(e) => setEmailInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleAddEmail()}
+              className="dark-web-email-input"
+              type="password"
+              placeholder="Paste HIBP API key..."
+              value={apiKeyInput}
+              onChange={(e) => setApiKeyInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSaveApiKey()}
             />
             <button
-              className="dw-btn-primary"
-              onClick={handleAddEmail}
-              disabled={addState === "checking" || !emailInput.trim()}
+              className="dark-web-check-btn"
+              onClick={handleSaveApiKey}
+              disabled={keyState === "saving" || !apiKeyInput.trim()}
             >
-              {addState === "checking" ? "Adding…" : "Add"}
+              {keyState === "saving" ? "Saving..." : "Save key"}
             </button>
           </div>
-          {addError && <div className="dw-error">{addError}</div>}
-
-          {/* Email list */}
-          {emails.length === 0 ? (
-            <div className="dw-empty">No email addresses added yet.</div>
-          ) : (
-            <div className="dw-email-list">
-              {emails.map((email) => {
-                const emailBreaches = breaches[email] ?? [];
-                const checked = lastChecked[email];
-                const isChecking = checkingEmail === email;
-                const err = checkError[email];
-                const isClean = checked !== undefined && emailBreaches.length === 0;
-                const hasBreaches = emailBreaches.length > 0;
-
-                return (
-                  <div key={email} className={`dw-email-row ${hasBreaches ? "dw-email-row--breach" : isClean ? "dw-email-row--clean" : ""}`}>
-                    <div className="dw-email-info">
-                      <div className="dw-email-addr">{email}</div>
-                      <div className="dw-email-meta">
-                        {isChecking ? (
-                          <span className="dw-checking">Checking…</span>
-                        ) : checked ? (
-                          <>
-                            {isClean && <span className="dw-clean-badge"><CheckIcon size={11} /> Secure</span>}
-                            {hasBreaches && <span className="dw-breach-badge">{emailBreaches.length} breach{emailBreaches.length !== 1 ? "es" : ""}</span>}
-                            <span className="dw-last-checked">Checked {formatRelativeTime(checked)}</span>
-                          </>
-                        ) : (
-                          <span className="dw-last-checked">Not yet checked</span>
-                        )}
-                        {err && <span className="dw-error dw-error--inline">{err}</span>}
-                      </div>
-                    </div>
-                    <div className="dw-email-actions">
-                      {hibpConfigured && (
-                        <button
-                          className="dw-btn-ghost"
-                          onClick={() => handleCheckEmail(email)}
-                          disabled={isChecking}
-                          title="Check now"
-                        >
-                          {isChecking ? "…" : "Check"}
-                        </button>
-                      )}
-                      <button
-                        className="dw-btn-ghost dw-btn-ghost--remove"
-                        onClick={() => handleRemoveEmail(email)}
-                        title="Remove"
-                        aria-label={`Remove ${email}`}
-                      >
-                        <XIcon size={13} />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+          {keyState === "error" && (
+            <div style={{ marginTop: 4, fontSize: 11, color: "var(--red)" }}>{keyError}</div>
           )}
         </div>
+      )}
 
-        {/* Breach alerts */}
-        {allBreaches.length > 0 && (
-          <div className="dw-section">
-            <div className="dw-section-title">Recent breach alerts</div>
-            <div className="dw-breach-list">
-              {Object.entries(breaches).map(([email, emailBreaches]) =>
-                emailBreaches.map((breach) => (
-                  <div key={`${email}-${breach.name}`} className="dw-breach-card">
-                    <div className="dw-breach-header">
-                      <span className="dw-breach-icon">⚠</span>
-                      <div>
-                        <div className="dw-breach-title">{breach.title || breach.name}</div>
-                        <div className="dw-breach-meta">
-                          {email}
-                          {breach.breach_date && (
-                            <> · Breached {formatBreachDate(breach.breach_date)}</>
-                          )}
-                          {breach.pwn_count > 0 && (
-                            <> · {breach.pwn_count.toLocaleString()} accounts affected</>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    {breach.data_classes.length > 0 && (
-                      <div className="dw-breach-data">
-                        <span className="dw-breach-data-label">Exposed:</span>{" "}
-                        {breach.data_classes.join(", ")}
-                      </div>
-                    )}
-                    <div className="dw-breach-advice">
-                      {breach.data_classes.some((d) =>
-                        d.toLowerCase().includes("password")
-                      ) && (
-                        <div className="dw-advice-item">
-                          → Change your {breach.title || breach.name} password if you haven't already
-                        </div>
-                      )}
-                      <div className="dw-advice-item">
-                        → Check if you reuse this password on other services
-                      </div>
-                    </div>
+      {/* Results */}
+      <div className="dark-web-results">
+        {emails.length === 0 ? (
+          <div className="dark-web-empty">
+            Add an email address to check for data breaches.
+          </div>
+        ) : allBreaches.length === 0 && emails.every((e) => lastChecked[e]) ? (
+          <div className="dark-web-safe">
+            <div className="dark-web-safe-label">No breaches found</div>
+            <div className="dark-web-safe-sub">
+              Your monitored addresses don't appear in any known data breaches.
+            </div>
+          </div>
+        ) : emails.some((e) => !lastChecked[e]) && hibpConfigured ? (
+          <div className="dark-web-loading">
+            {emails.filter((e) => checkingEmail === e).length > 0
+              ? "Checking..."
+              : emails.filter((e) => !lastChecked[e]).map((e) => (
+                  <div key={e} style={{ display: "flex", gap: 8, justifyContent: "center", alignItems: "center" }}>
+                    <span>{e}</span>
+                    <button
+                      className="dark-web-check-btn"
+                      onClick={() => handleCheckEmail(e)}
+                      disabled={checkingEmail === e}
+                      style={{ padding: "4px 10px", fontSize: 11 }}
+                    >
+                      Check now
+                    </button>
                   </div>
                 ))
-              )}
-            </div>
+            }
           </div>
-        )}
-
-        {/* All clear */}
-        {emails.length > 0 && allBreaches.length === 0 && Object.keys(lastChecked).length === emails.length && (
-          <div className="dw-section">
-            <div className="dw-all-clear">
-              <CheckIcon size={16} />
-              <div>
-                <div className="dw-all-clear-title">No breaches found</div>
-                <div className="dw-all-clear-sub">
-                  Your monitored addresses don't appear in any known data breaches.
+        ) : (
+          Object.entries(breaches).flatMap(([email, emailBreaches]) =>
+            emailBreaches.map((breach) => (
+              <div key={`${email}-${breach.name}`} className="breach-row">
+                <div className="breach-row-icon">
+                  {breach.title?.[0] ?? breach.name?.[0] ?? "?"}
+                </div>
+                <div className="breach-row-body">
+                  <div className="breach-row-name">{breach.title || breach.name}</div>
+                  <div className="breach-row-date">
+                    {email}
+                    {breach.breach_date && ` · Breached ${breachDate(breach.breach_date)}`}
+                    {breach.pwn_count > 0 && ` · ${breach.pwn_count.toLocaleString()} accounts`}
+                  </div>
+                  {breach.data_classes.length > 0 && (
+                    <div className="breach-data-classes">
+                      {breach.data_classes.map((dc) => (
+                        <span key={dc} className="breach-data-class">{dc}</span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
-          </div>
+            ))
+          )
         )}
+
+        {/* Per-email check buttons */}
+        {hibpConfigured && emails.map((email) => (
+          checkError[email] ? (
+            <div key={email} style={{ padding: "8px 20px", fontSize: 11, color: "var(--red)" }}>
+              {email}: {checkError[email]}
+            </div>
+          ) : null
+        ))}
       </div>
+
+      {/* Check all button */}
+      {hibpConfigured && emails.length > 0 && (
+        <div style={{ padding: "10px 20px", borderTop: "1px solid var(--border-subtle)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+            {emails.map((e) => lastChecked[e] ? `Checked ${rel(lastChecked[e])}` : "").filter(Boolean)[0] ?? ""}
+          </span>
+          <button
+            className="dark-web-check-btn"
+            onClick={() => emails.forEach((e) => handleCheckEmail(e))}
+            disabled={checkingEmail !== null}
+            style={{ padding: "5px 12px", fontSize: 11 }}
+          >
+            {checkingEmail ? "Checking..." : "Check all"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
